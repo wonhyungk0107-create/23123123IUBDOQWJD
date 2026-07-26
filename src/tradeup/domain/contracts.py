@@ -303,11 +303,22 @@ class CandidateEvaluation:
     evaluated_at: datetime
 
     # -- cost ---------------------------------------------------------------
+    # ``acquisition_cost`` is the cash that actually leaves the wallet to buy the
+    # inputs. ``all_in_cost`` adds the modelled charges that are real but not paid
+    # to a venue: operations, capital carry, and the partial-fill reserve.
+    #
+    # EV_net  = expected_output_value - all_in_cost
+    # ROI_net = EV_net / acquisition_cost
+    #
+    # ROI is taken against acquisition cost because that is the capital genuinely
+    # committed; dividing by the loaded figure would flatter a slow contract by
+    # inflating its own denominator with its own carry charge.
     input_cost: Money
     buyer_fees: Money
     deposit_fees: Money
     fx_cost: Money
     payment_surcharge: Money
+    acquisition_cost: Money
     operational_cost: Money
     capital_carry_cost: Money
     partial_fill_reserve: Money

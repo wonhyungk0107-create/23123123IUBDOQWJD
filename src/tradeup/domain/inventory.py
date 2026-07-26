@@ -3,7 +3,7 @@
 Capital is tied up from the moment an input is bought until the output's sale
 proceeds settle. The states below are the checkpoints of that journey, and the
 transition table is what stops the system from modelling same-day recycling of
-capital that is in fact sitting in a ten-day trade hold.
+capital that is in fact sitting in a multi-day trade hold.
 
 Every transition is validated and produces a ledger event. There is no method that
 sets a state directly.
@@ -34,7 +34,17 @@ class InventoryState(enum.StrEnum):
     PURCHASE_REQUESTED = "PURCHASE_REQUESTED"
     PURCHASED = "PURCHASED"
     TRADE_PROTECTED = "TRADE_PROTECTED"
-    """Held by the venue and invisible to third parties (DMarket ~10 days)."""
+    """Held by the venue under a trade-protection period.
+
+    DMarket's published guidance describes a **7-day** Steam trade-protection window
+    during which an item cannot be withdrawn. An earlier draft of this project's
+    brief carried "~10 days" for DMarket and "~8 days" for CS.MONEY; neither figure
+    has a located source, so neither is encoded here. Hold durations come from
+    observed transitions or a cited venue document -- never from a remembered number,
+    because this value feeds capital-days and therefore the ranking score.
+
+    See docs/source-matrix.md for what is and is not verified.
+    """
 
     PLATFORM_INVENTORY = "PLATFORM_INVENTORY"
     WITHDRAWABLE = "WITHDRAWABLE"

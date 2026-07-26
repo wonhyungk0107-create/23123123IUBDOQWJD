@@ -47,15 +47,6 @@ KEPT_FIELDS = (
 )
 
 
-class DecimalEncoder(json.JSONEncoder):
-    """Emit Decimal as an exact JSON number, preserving the original text."""
-
-    def default(self, o: Any) -> Any:
-        if isinstance(o, Decimal):
-            return float(o)  # pragma: no cover - replaced by the raw-text pass below
-        return super().default(o)
-
-
 def _encode(value: Any) -> str:
     """Serialise with Decimals rendered as their exact literal text."""
     if isinstance(value, Decimal):
@@ -67,7 +58,9 @@ def _encode(value: Any) -> str:
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
     if isinstance(value, Mapping):
-        inner = ",".join(f"{json.dumps(k, ensure_ascii=False)}:{_encode(v)}" for k, v in value.items())
+        inner = ",".join(
+            f"{json.dumps(k, ensure_ascii=False)}:{_encode(v)}" for k, v in value.items()
+        )
         return "{" + inner + "}"
     if isinstance(value, Sequence):
         return "[" + ",".join(_encode(v) for v in value) + "]"

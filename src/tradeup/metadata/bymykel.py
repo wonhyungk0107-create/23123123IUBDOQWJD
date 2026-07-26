@@ -96,10 +96,7 @@ def _issue(severity: IssueSeverity, code: str, subject: str, message: str) -> Me
 
 
 def _coerce_rarity(raw: Any, subject: str) -> tuple[Rarity | None, MetadataIssue | None]:
-    if isinstance(raw, Mapping):
-        name = raw.get("name")
-    else:
-        name = raw
+    name = raw.get("name") if isinstance(raw, Mapping) else raw
     if not isinstance(name, str) or not name.strip():
         return None, _issue(
             IssueSeverity.ERROR, "MISSING_RARITY", subject, "entry has no rarity name"
@@ -205,7 +202,9 @@ def parse_payload(
         if not isinstance(entry, Mapping):
             skipped += 1
             issues.append(
-                _issue(IssueSeverity.ERROR, "MALFORMED_ENTRY", "<unknown>", "entry is not an object")
+                _issue(
+                    IssueSeverity.ERROR, "MALFORMED_ENTRY", "<unknown>", "entry is not an object"
+                )
             )
             continue
 
@@ -214,12 +213,16 @@ def parse_payload(
         if not isinstance(upstream_id, str) or not upstream_id:
             skipped += 1
             issues.append(
-                _issue(IssueSeverity.ERROR, "MISSING_ID", str(name or "<unknown>"), "entry has no id")
+                _issue(
+                    IssueSeverity.ERROR, "MISSING_ID", str(name or "<unknown>"), "entry has no id"
+                )
             )
             continue
         if not isinstance(name, str) or not name:
             skipped += 1
-            issues.append(_issue(IssueSeverity.ERROR, "MISSING_NAME", upstream_id, "entry has no name"))
+            issues.append(
+                _issue(IssueSeverity.ERROR, "MISSING_NAME", upstream_id, "entry has no name")
+            )
             continue
 
         rarity, rarity_issue = _coerce_rarity(entry.get("rarity"), upstream_id)
