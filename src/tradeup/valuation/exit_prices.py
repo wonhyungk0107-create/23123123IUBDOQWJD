@@ -208,6 +208,28 @@ class ExitPriceResolver:
 
         rung = self._best_rung(usable)
         at_rung = [o for o in usable if o.source is rung]
+
+        # Ask-floor cap, found live 2026-07-26: a thin market's completed-sale
+        # median can sit far above the lowest *current* ask (Tec-9 | Sultan MW:
+        # skinport sale median $2.71 vs csfloat ask $0.96), and valuing an exit
+        # above the standing cheapest offer is optimism, not evidence. When ask
+        # observations exist and the chosen sale-history gross exceeds the lowest
+        # ask, the valuation switches to the ask evidence — its venue, its fees,
+        # its (larger) haircut. Executable bids are exempt: a live bid is real.
+        if rung is not ValuationSource.EXECUTABLE_CASH_BID:
+            asks = [o for o in usable if o.source is ValuationSource.DEPTH_ADJUSTED_ASK]
+            if asks:
+                lowest_ask = min(asks, key=lambda o: (o.gross.minor_units, o.venue))
+                sale_gross = self._quantile_price(at_rung)
+                if lowest_ask.gross < sale_gross:
+                    rung = ValuationSource.DEPTH_ADJUSTED_ASK
+                    at_rung = [
+                        o
+                        for o in asks
+                        if o.gross.minor_units == lowest_ask.gross.minor_units
+                        and o.venue == lowest_ask.venue
+                    ]
+
         gross = self._quantile_price(at_rung)
         # Prefer the venue with the most evidence at this rung; ties break on name so
         # the choice is deterministic across runs.

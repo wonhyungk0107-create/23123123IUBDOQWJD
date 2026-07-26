@@ -38,7 +38,7 @@ from tradeup.domain.items import QualityType, Rarity
 from tradeup.domain.listings import ListingIdentity, MarketplaceListing
 from tradeup.domain.money import Money
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
-from tradeup.domain.valuation import PriceObservation
+from tradeup.domain.valuation import PriceObservation, ValuationSource
 from tradeup.execution.policy import RiskPolicy
 from tradeup.execution.reservations import ReservationRegistry
 from tradeup.metadata.bymykel import load_pinned_snapshot
@@ -59,6 +59,10 @@ __all__ = ["LiveScanError", "LiveScanResult", "run_live_scan"]
 
 #: Skinport's request budget bounds how many output names can be priced per scan.
 _MAX_WANTED_NAMES = 7 * 50
+
+#: Targeted confirmations fetch CSFloat asks per output name; this caps the spend
+#: against the measured 200-requests-per-window budget.
+_EXIT_ASK_NAME_LIMIT = 25
 
 _LIVE_CARD_WARNING = (
     "LIVE shadow scan. Prices and floats are real market reads, but the fee "
@@ -156,7 +160,7 @@ def _wanted_output_names(
     for collection_id in ordered:
         pool = registry.output_pool(collection_id, input_rarity)
         names: dict[str, WantedName] = {}
-        for skin_id in pool.output_skin_ids:
+        for skin_id in sorted(pool.output_skin_ids):
             if not registry.has_skin(skin_id):
                 continue
             skin = registry.skin(skin_id)
@@ -280,11 +284,54 @@ async def _gather_market_data(
             f"skinport sales-history fetch refused: {observations_result.status.value} "
             f"({observations_result.detail})"
         )
+    observations = list(observations_result.unwrap())
+    observations_detail = observations_result.detail
+
+    # Targeted confirmations also read the *executable* side of the exit: the
+    # lowest current buy-now asks on CSFloat per output name. These feed the
+    # resolver's ask-floor cap, so a thin market's inflated sale median cannot
+    # value an exit above the standing cheapest offer (venue: csfloat).
+    if target_names:
+        ask_names = list(wanted.items())[:_EXIT_ASK_NAME_LIMIT]
+        fetched = 0
+        stopped = ""
+        for out_name, (skin_id, out_quality, out_wear) in ask_names:
+            per_name = await csfloat.fetch_listings(
+                ListingQuery(market_hash_name=out_name, quality=out_quality, limit=5),
+                moment=now,
+            )
+            if not per_name.ok:
+                stopped = f"; exit-ask fetch stopped at {fetched} names ({per_name.status.value})"
+                break
+            asks = per_name.unwrap()
+            for listing in asks:
+                observations.append(
+                    PriceObservation(
+                        skin_id=skin_id,
+                        quality=out_quality,
+                        wear=out_wear,
+                        venue=csfloat.venue,
+                        gross=listing.price,
+                        source=ValuationSource.DEPTH_ADJUSTED_ASK,
+                        observed_at=now,
+                        evidence_count=1,
+                        depth_units=len(asks),
+                    )
+                )
+            fetched += 1
+        observations_detail += (
+            f"; csfloat exit asks for {fetched}/{len(wanted)} output names{stopped}"
+        )
+        if len(wanted) > _EXIT_ASK_NAME_LIMIT:
+            observations_detail += (
+                f" ({len(wanted) - _EXIT_ASK_NAME_LIMIT} names beyond the ask budget)"
+            )
+
     return (
         listings_result,
         csfloat,
-        tuple(observations_result.unwrap()),
-        observations_result.detail,
+        tuple(observations),
+        observations_detail,
         priced,
         skipped,
         len(wanted),

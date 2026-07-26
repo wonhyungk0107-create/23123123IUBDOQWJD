@@ -301,6 +301,20 @@ database and destroyed the first batch's calibration rows;
 `tools/write_verification.py` now runs every gate against a throwaway database,
 verified by re-running the battery and finding the history intact.
 
+### Operator-caught valuation defect: the ask-floor cap — 2026-07-26
+
+A confirmation briefly showed **+41.25%** exact ROI (Arabesque MW, 10× SCAR-20 |
+Sirocco Script at $0.08 → four Mil-Spec outputs). The operator challenged the
+Tec-9 | Sultan valuation, and a live audit proved them right: the $2.34 net came
+from **Skinport's** thin sale median ($2.71 over 6 sales spread $0.75–$3.32)
+while **CSFloat's** lowest current ask was **$0.96** — the sale median sat far
+above anything executable. Fix, tested and live: targeted confirmations now
+fetch CSFloat exit asks per output name, and the exit resolver **caps any
+sale-history gross at the lowest current ask** (switching venue, fees and
+haircut to the ask's), with executable bids exempt. Re-confirmed under the cap,
+the same lead reads **−40.00%** — the false positive is structurally closed,
+and every valuation now records the venue it priced from.
+
 ## The single highest-value next task
 
 **Let the schedule accumulate the calibration curve.** Three confirmations land

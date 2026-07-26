@@ -289,3 +289,55 @@ class TestPartialFill:
             PartialFillPolicy(
                 base_survival_probability=Decimal("0.5"), floor_survival=Decimal("0.9")
             )
+
+
+class TestAskFloorCap:
+    """Found live 2026-07-26 (Tec-9 | Sultan MW): a thin market's sale median
+    ($2.71, skinport) sat far above the lowest current ask ($0.96, csfloat).
+    A sale-history valuation must never exceed the standing cheapest offer."""
+
+    def test_a_sale_median_above_the_lowest_ask_is_capped_to_the_ask(
+        self, fee_schedule: FeeSchedule
+    ) -> None:
+        observations = [
+            make_observation(
+                gross_minor=271, source=ValuationSource.COMPLETED_SALE, venue="dmarket"
+            ),
+            make_observation(
+                gross_minor=96, source=ValuationSource.DEPTH_ADJUSTED_ASK, venue="csfloat"
+            ),
+        ]
+        result = resolve(resolver(fee_schedule), observations)
+        assert result.source is ValuationSource.DEPTH_ADJUSTED_ASK
+        assert result.exit_venue == "csfloat"
+        assert result.gross_reference == usd(96)
+
+    def test_a_sale_median_at_or_below_the_ask_floor_is_kept(
+        self, fee_schedule: FeeSchedule
+    ) -> None:
+        observations = [
+            make_observation(
+                gross_minor=100, source=ValuationSource.COMPLETED_SALE, venue="dmarket"
+            ),
+            make_observation(
+                gross_minor=150, source=ValuationSource.DEPTH_ADJUSTED_ASK, venue="csfloat"
+            ),
+        ]
+        result = resolve(resolver(fee_schedule), observations)
+        assert result.source is ValuationSource.COMPLETED_SALE
+        assert result.exit_venue == "dmarket"
+        assert result.gross_reference == usd(100)
+
+    def test_an_executable_bid_is_exempt_from_the_cap(self, fee_schedule: FeeSchedule) -> None:
+        """A live bid above the ask floor is money someone is offering right now."""
+        observations = [
+            make_observation(
+                gross_minor=200, source=ValuationSource.EXECUTABLE_CASH_BID, venue="csfloat"
+            ),
+            make_observation(
+                gross_minor=96, source=ValuationSource.DEPTH_ADJUSTED_ASK, venue="csfloat"
+            ),
+        ]
+        result = resolve(resolver(fee_schedule), observations)
+        assert result.source is ValuationSource.EXECUTABLE_CASH_BID
+        assert result.gross_reference == usd(200)
