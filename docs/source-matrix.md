@@ -122,14 +122,14 @@ only.** Any CSFloat input in a bundle must go on an operator card with a direct
 listing link. Community projects are known to call unlisted CSFloat routes; we do
 not, and a CSFloat adapter must never implement `execute` as an HTTP call.
 
-**Rate limits.** **Not documented.** The official documentation states no rate
-limit (**VERIFIED** — absence confirmed against the docs source). Third-party
-client libraries and community write-ups assert figures such as "200 requests per
-hour per API key" and various per-5-minute buckets; these are **UNVERIFIED**
-and mutually inconsistent, and must not be encoded as constants. The adapter
-should treat rate limiting as discovered at runtime — honour `429` and any
-`Retry-After`, back off exponentially, and record observed ceilings as
-measurements rather than configuration.
+**Rate limits.** **Not documented — now MEASURED (2026-07-26).** Authenticated
+responses carry `x-ratelimit-limit: 200`, `x-ratelimit-remaining` and
+`x-ratelimit-reset` headers; the reset epoch observed is consistent with an
+hourly window. Separately, a request with the documented maximum `limit=50`
+draws a **429 with no rate headers** (a distinct limiter or WAF rule) while
+`limit=40` succeeds — the adapter's page size is therefore 40, recorded as a
+measurement, not documentation. The client still honours `429`/`Retry-After` at
+runtime rather than trusting these numbers to hold.
 
 **Terms-of-service constraints.** **UNVERIFIED.** `csfloat.com/support/tos` and
 `csfloat.com/support/terms` both render as an empty client-side application shell
@@ -173,9 +173,19 @@ response body:
 - What are the semantics of `item.tradable` and does a purchased item carry a
   trade lock the buyer inherits? Trade-lock omission is a false-profitability
   vector and this field is not yet interpreted.
-- Does `GET /listings` support server-side filters (rarity, type, price) that
-  would let the scanner request only `buy_now` rows? The documented parameter
-  list should be re-read before optimising the scan loop.
+- ~~Does `GET /listings` support server-side filters?~~ **Resolved 2026-07-26:**
+  the documentation lists `type` (`buy_now`/`auction`), `rarity`, `category`,
+  `sort_by`, `min_price`/`max_price` (cents), `market_hash_name`, float bounds
+  and cursor pagination. The `rarity` parameter's *values* are undocumented; the
+  adapter sends the game's standard indices (only 6=Covert confirmed live) and
+  relies on per-row registry cross-checks so a wrong index costs recall, never
+  correctness.
+- **Fees for CSFloat are dated official statements, not current confirmations.**
+  The 2% sale fee and 0.5–2.5% withdrawal range come from the official blog post
+  of 2021-08-22 (`blog.csfloat.com/changes-to-fees-on-csgofloat-market/`). The
+  live fee schedule (`valuation/venue_fees.py`) encodes 2% / 2.5% (pessimistic)
+  with that provenance; both must be re-read from the account screen before any
+  purchase decision.
 
 ---
 
@@ -720,6 +730,44 @@ integrate.
   `UNSUPPORTED` and contributes nothing to discovery.
 
 **Status:** UNIDENTIFIED / UNVERIFIED. Adapter disabled.
+
+---
+
+## 10. Skinport
+
+**Added 2026-07-26.** **Role.** Completed-sale price evidence for output
+valuation, and a sourced exit-fee venue. Never execution truth; the adapter
+produces `COMPLETED_SALE` observations only.
+
+**Documentation.** <https://docs.skinport.com/> (**VERIFIED**, renders). The API
+is public and keyless. `GET /v1/items` and `GET /v1/sales/history` are
+documented with: no authentication, **8 requests per 5 minutes**, responses
+cached 5 minutes, `Accept-Encoding: br` mandatory (hence the `brotli`
+dependency), `app_id=730`, `currency=USD` supported, prices as decimal
+major-unit numbers. Sales history returns per-name aggregates
+(`last_24_hours/7_days/30_days/90_days` × `min/max/avg/median/volume`)
+(**VERIFIED** against the rendered docs, 2026-07-26). The adapter batches
+comma-delimited names, holds one request of the window in reserve, and reports
+— never silently drops — names beyond the budget.
+
+**Fees.** Selling fee 8% standard (6% above EUR 1000, not encoded — the
+pessimistic 8% applies), per the official fee-reduction announcement of July
+2025; payouts to a linked bank account are stated fee-free per the official FAQ
+(`skinport.com/faq/payout-fees`). Both **SECONDARY**: the pages render
+client-side and were confirmed through their published summaries. Encoded in
+`valuation/venue_fees.py` with that provenance; re-verify before any sale
+decision.
+
+**Purchase/execution operation.** None used and none will be: this integration
+is read-only price reference by design.
+
+**Unresolved questions.**
+
+- Do Skinport sale medians include or exclude the selling fee? The valuation
+  currently treats them as gross and deducts the fee, which is the conservative
+  reading if they are actually net.
+- The 6% high-tier threshold is stated in EUR; the schedule prices in USD and
+  ignores the reduction entirely (pessimistic).
 
 ---
 

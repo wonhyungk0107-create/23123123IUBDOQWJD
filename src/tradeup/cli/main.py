@@ -215,6 +215,66 @@ def candidates_scan(
     )
 
 
+@candidates_app.command("scan-live")
+def candidates_scan_live(
+    rarity: Annotated[str, typer.Option(help="Input rarity to scan.")] = "MIL_SPEC",
+    limit: Annotated[int, typer.Option(help="Maximum live listings to ingest.")] = 150,
+    max_candidates: Annotated[
+        int, typer.Option(help="Cap on candidates; each revalidation costs API budget.")
+    ] = 12,
+    output: Annotated[Path | None, typer.Option(help="Directory for artifacts.")] = None,
+    quiet: Annotated[bool, typer.Option(help="Only print the summary.")] = False,
+) -> None:
+    """Read-only shadow scan against the live market. Requires a CSFloat API key."""
+    from tradeup.pipeline.live_scan import LiveScanError, run_live_scan
+    from tradeup.reporting.renderers import render_card_console, render_ranked_table
+
+    settings = _settings()
+    _echo_boundary(settings)
+    typer.echo(
+        "LIVE read-only shadow scan. Fee figures come from dated public statements "
+        "and are NOT re-verified at the venue; nothing here is a buy instruction.\n"
+    )
+    try:
+        result = run_live_scan(
+            settings=settings,
+            now=_now(),
+            input_rarity=Rarity(rarity),
+            listing_limit=limit,
+            max_candidates=max_candidates,
+            output_dir=output,
+        )
+    except LiveScanError as exc:
+        typer.echo(f"scan blocked: {exc}")
+        raise typer.Exit(1) from exc
+
+    if not quiet:
+        typer.echo(render_ranked_table(list(result.cards)))
+        for card in result.cards:
+            typer.echo("")
+            typer.echo(render_card_console(card))
+
+    stats = result.report.statistics
+    typer.echo("\nSCAN STATISTICS")
+    for key, value in stats.summary().items():
+        typer.echo(f"  {key:<26} {value}")
+    typer.echo(f"  listings_fetch             {result.listings_fetch_detail}")
+    typer.echo(f"  output_pricing             {result.observations_detail}")
+    typer.echo(
+        f"  collections priced/skipped {len(result.collections_priced)}"
+        f"/{len(result.collections_skipped)}"
+    )
+
+    typer.echo("\nARTIFACTS")
+    for kind, path in sorted(result.artifacts.items()):
+        typer.echo(f"  {kind:<10} {path}")
+
+    typer.echo(
+        f"\n{result.approved_count} candidate(s) cleared all gates, "
+        f"{result.rejected_count} rejected. Nothing was bought; this is a measurement."
+    )
+
+
 @candidates_app.command("explain")
 def candidates_explain(contract_id: str) -> None:
     """Explain one candidate: selection, constraints and search space."""

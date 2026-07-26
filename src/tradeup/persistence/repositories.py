@@ -197,8 +197,7 @@ class CandidateRepository:
         row.input_count = candidate.input_count
         row.output_quality = candidate.output_quality.value
         row.procurement_mode = candidate.procurement_mode.value
-        row.average_normalized_numerator = candidate.average_normalized_float.numerator
-        row.average_normalized_denominator = candidate.average_normalized_float.denominator
+        row.average_normalized = str(candidate.average_normalized_float)
         row.created_at = candidate.created_at
         row.expires_at = candidate.expires_at
         row.input_identities_json = {
@@ -288,7 +287,7 @@ class CandidateRepository:
         row = self.get(candidate_id)
         if row is None:
             return None
-        return Fraction(row.average_normalized_numerator, row.average_normalized_denominator)
+        return Fraction(row.average_normalized)
 
     def latest_evaluation(self, candidate_id: str) -> CandidateEvaluationRow | None:
         return self._session.scalar(

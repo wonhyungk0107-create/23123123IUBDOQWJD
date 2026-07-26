@@ -50,9 +50,9 @@ through the project venv's own launchers, and the exact commands are recorded in
 
 ## Tests
 
-**495 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
+**521 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
 The opt-in live suite (`pytest -m live`) additionally passed 6/6 on 2026-07-26 with
-real credentials — see Live checks.
+real credentials, and live shadow scans ran end to end — see Live checks.
 
 | Suite | Covers |
 |---|---|
@@ -64,7 +64,8 @@ real credentials — see Live checks.
 
 ## Coverage
 
-Overall **86.1%** (floor 80%). Money-critical modules, floor 90%:
+Overall **85.6%** (floor 80%; the live-scan orchestration module is exercised by
+the live runs rather than the mandatory suite). Money-critical modules, floor 90%:
 
 | Module | Branch coverage |
 |---|---|
@@ -168,8 +169,37 @@ Post-fix probe: 5 of 25 rows on a default page parsed as purchasable listings, a
 shape — VERIFIED 2026-07-26").
 
 **DMarket remains unverified live** — keys are configured, but no live DMarket read
-has been performed; its payload shapes are still hand-authored approximations.
-SkinSnipe has no key and stays a typed refusal.
+has been performed; its payload shapes are still hand-authored approximations, and
+a live read additionally requires an Ed25519 signer (no crypto library is currently
+a dependency). SkinSnipe has no key and stays a typed refusal.
+
+### First live shadow scans — 2026-07-26
+
+`tradeup candidates scan-live` ran end to end against the real market (CSFloat
+buy-now inputs, Skinport completed-sale exit evidence, sourced fee schedule
+`live-sourced-2026-07-26`):
+
+| Measurement | Value |
+|---|---|
+| Live listings ingested / usable | 120 / 120 (0 dropped) |
+| Compositions enumerated | 93 |
+| Bundles solved | 21 |
+| Candidates evaluated | 10 (capped for API budget) |
+| Approved | **0** |
+| Rejection census | `BELOW_DISCOVERY_ROI=10` |
+| Net ROI range of rejected candidates | **−51.2% to −76.7%** |
+| Output names priced via Skinport | 145/148 |
+
+Every candidate came from the extreme bottom of the market (bundles of $0.41–0.50
+total — the `lowest_price` sort surveys the floor first), and every one loses half
+its cost or more after fees and conservative haircuts. **Zero qualifying
+opportunities at the market floor is the first real data point**, not a software
+failure: the artifacts are under `artifacts/reports/live-scan-*.{md,json}`.
+
+Going live also surfaced and fixed three defects fixtures could not: float-budget
+truncation discarded the only feasible budget; exact rationals from 17-digit live
+floats overflowed int64 columns (migration `c7d02be51f44` stores them as text);
+and CSFloat 429s the documented `limit=50` page size (measured ceiling: 40).
 
 ## Known gaps and unresolved blockers
 
@@ -205,14 +235,13 @@ SkinSnipe has no key and stays a typed refusal.
 
 ## The single highest-value next task
 
-**Run the read-only shadow scanner against CSFloat with a real API key and record
-listing survival at 30s / 5m / 1h.**
-
-Everything above is instrumentation. The one thing that would move this from
-"software that works" to "evidence about whether an edge exists" is measuring how
-many complete bundles clear 8% net ROI after direct revalidation, and how often those
-listings are still buyable minutes later.
-
-That measurement also replaces the least-evidenced number in the model — the bundle
-completion prior — with an observation. Until it exists, every ROI figure this system
-produces rests on a guess about fill rates.
+**Scan beyond the market floor.** The scanner works and measured its first zero,
+but `sort_by=lowest_price` over 120 listings only surveys the cheapest junk tier,
+where trade-ups are structurally unprofitable. The next iteration should search
+where the opportunity could actually live: per-collection targeted queries
+(`collection` + `min_price`/`max_price` bands around promising input tiers),
+scheduled across the measured 200-requests-per-window budget, accumulating
+rejection statistics across runs — the persistence layer already records every
+scan. Once candidates start passing discovery, the revalidation pass begins
+producing the listing-survival measurement that calibrates the bundle-completion
+prior, which remains the least-evidenced number in the model.

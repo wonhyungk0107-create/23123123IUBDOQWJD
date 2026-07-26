@@ -546,7 +546,15 @@ class ScanPipeline:
     def _budgets_for(
         self, composition: ContractComposition, config: ScanConfig
     ) -> tuple[Fraction, ...]:
-        """Float budgets worth solving, derived from the outputs' wear boundaries."""
+        """Float budgets worth solving, derived from the outputs' wear boundaries.
+
+        Budgets sort ascending and the *loosest* end is kept when truncating.
+        Found live (2026-07-26): collections with many output skins produce more
+        breakpoints than the cap, and truncating from the tight end silently
+        discarded the unconstrained budget — the only one a page of cheap,
+        high-float listings can ever satisfy — so the optimizer solved nothing.
+        The tightest budgets are the ones a real market rarely feeds anyway.
+        """
         pools = self._registry.output_pools_for(
             composition.collection_ids, composition.input_rarity
         )
@@ -559,7 +567,7 @@ class ScanPipeline:
         if not ranges:
             return ()
         budgets = candidate_float_budgets(ranges)
-        return budgets[: config.max_budgets_per_composition]
+        return budgets[-config.max_budgets_per_composition :]
 
     @staticmethod
     def _record(

@@ -30,6 +30,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     event,
 )
@@ -179,9 +180,10 @@ class CandidateRow(Base):
     output_quality: Mapped[str] = mapped_column(String(32))
     procurement_mode: Mapped[str] = mapped_column(String(64))
 
-    # Exact rational, stored as numerator/denominator so it round-trips without loss.
-    average_normalized_numerator: Mapped[int] = mapped_column(BigInteger)
-    average_normalized_denominator: Mapped[int] = mapped_column(BigInteger)
+    # Exact rational, stored as text ("numerator/denominator") so it round-trips
+    # without loss. Found live (2026-07-26): real 17-digit floats averaged over ten
+    # inputs produce rationals whose terms overflow a 64-bit integer column.
+    average_normalized: Mapped[str] = mapped_column(Text, default="0")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

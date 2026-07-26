@@ -82,6 +82,33 @@ def _decimal(value: Any, field: str) -> Decimal:
         raise TransportSchemaError(f"csfloat {field} is not numeric: {value!r}") from exc
 
 
+#: Documented ``category`` filter values (1 normal, 2 stattrak, 3 souvenir).
+_CATEGORY_PARAM: Mapping[QualityType, int] = {
+    QualityType.NORMAL: 1,
+    QualityType.STATTRAK: 2,
+    QualityType.SOUVENIR: 3,
+}
+
+#: ``rarity`` filter values. The parameter is documented but its values are not;
+#: these are the game's standard rarity indices, of which only 6=Covert has been
+#: confirmed against a live response (docs/source-matrix.md). A wrong value here
+#: biases recall, never correctness: every returned row is still resolved against
+#: the registry and cross-checked on rarity_name.
+_RARITY_PARAM: Mapping[Rarity, int] = {
+    Rarity.CONSUMER: 1,
+    Rarity.INDUSTRIAL: 2,
+    Rarity.MIL_SPEC: 3,
+    Rarity.RESTRICTED: 4,
+    Rarity.CLASSIFIED: 5,
+    Rarity.COVERT: 6,
+}
+
+#: Measured live (2026-07-26): the documented maximum ``limit=50`` draws a 429
+#: from a limiter that carries no rate headers, while 40 succeeds against the
+#: measured 200-requests-per-window budget. 40 is the safe page size.
+_PAGE_LIMIT = 40
+
+
 class CSFloatAdapter(MarketAdapter):
     """Read-only CSFloat client."""
 
@@ -282,9 +309,37 @@ class CSFloatAdapter(MarketAdapter):
 
     # -- operations ----------------------------------------------------------
 
+    def _listing_params(self, query: ListingQuery) -> dict[str, str]:
+        """Documented filters only. ``type=buy_now`` is unconditional: an auction's
+        current price is a bid, and this system only models purchasable asks."""
+        params: dict[str, str] = {
+            "type": "buy_now",
+            "sort_by": "lowest_price",
+        }
+        if query.market_hash_name:
+            params["market_hash_name"] = query.market_hash_name
+        if query.min_float is not None:
+            params["min_float"] = str(query.min_float)
+        if query.max_float is not None:
+            params["max_float"] = str(query.max_float)
+        if query.max_price is not None:
+            params["max_price"] = str(query.max_price.minor_units)
+        if query.rarity is not None:
+            params["rarity"] = str(_RARITY_PARAM[query.rarity])
+        if query.quality is not None:
+            params["category"] = str(_CATEGORY_PARAM[query.quality])
+        return params
+
     async def fetch_listings(
         self, query: ListingQuery, *, moment: datetime
     ) -> CapabilityResult[Sequence[MarketplaceListing]]:
+        """Fetch up to ``query.limit`` listings, following documented cursor pages.
+
+        Rows are parsed strictly and individually: an unparseable row is excluded
+        and counted, never defaulted. Only when *no* row across the whole fetch
+        parses is the result a refusal — an empty success there would hide a
+        breaking API change behind "the market was quiet".
+        """
         if not self.has_credentials:
             return self._refuse(
                 "fetch_listings",
@@ -292,40 +347,64 @@ class CSFloatAdapter(MarketAdapter):
                 CapabilityStatus.AUTHENTICATION_REQUIRED,
                 "CSFLOAT_API_KEY is not configured",
             )
-        params: dict[str, str] = {"limit": str(query.limit)}
-        if query.market_hash_name:
-            params["market_hash_name"] = query.market_hash_name
-        if query.min_float is not None:
-            params["min_float"] = str(query.min_float)
-        if query.max_float is not None:
-            params["max_float"] = str(query.max_float)
+        base_params = self._listing_params(query)
+        collected: list[MarketplaceListing] = []
+        drop_reasons: list[str] = []
+        total_rows = 0
+        pages = 0
+        max_pages = -(-query.limit // _PAGE_LIMIT)
+        cursor: str | None = None
 
         try:
-            response = await self._client.get(
-                f"{self._base_url}/listings", params=params, headers=self._headers()
-            )
-            listings, detail = self._parse_listings_response(response, moment)
+            while len(collected) < query.limit and pages < max_pages:
+                params = dict(base_params)
+                params["limit"] = str(min(_PAGE_LIMIT, query.limit - len(collected)))
+                if cursor:
+                    params["cursor"] = cursor
+                response = await self._client.get(
+                    f"{self._base_url}/listings", params=params, headers=self._headers()
+                )
+                listings, page_drops, cursor = self._parse_listings_page(response, moment)
+                collected.extend(listings)
+                drop_reasons.extend(page_drops)
+                total_rows += len(listings) + len(page_drops)
+                pages += 1
+                if not cursor or (not listings and not page_drops):
+                    break
         except TransportError as exc:
             return self._failure("fetch_listings", moment, exc)
+
+        if total_rows and not collected:
+            return self._failure(
+                "fetch_listings",
+                moment,
+                TransportSchemaError(
+                    f"csfloat returned {total_rows} rows across {pages} page(s) and none "
+                    f"parsed; first fault: {drop_reasons[0]}"
+                ),
+            )
+        detail = f"{pages} page(s)"
+        if drop_reasons:
+            detail += (
+                f"; {len(drop_reasons)}/{total_rows} rows dropped by strict parse; "
+                f"first: {drop_reasons[0]}"
+            )
         return CapabilityResult.succeeded(
-            self.venue, "fetch_listings", moment, listings, detail=detail
+            self.venue, "fetch_listings", moment, tuple(collected), detail=detail
         )
 
-    def _parse_listings_response(
+    def _parse_listings_page(
         self, response: HttpResponse, moment: datetime
-    ) -> tuple[tuple[MarketplaceListing, ...], str]:
-        """Parse a listings page. Strict per listing; tolerant per page.
-
-        Live pages mix item types, and some rows genuinely lack fields a contract
-        input requires (observed 2026-07-26: a live row with no ``min_float``). A
-        row that fails the strict parse is *excluded and counted* — never defaulted
-        — and the census travels in the success detail so a drop is visible
-        evidence, not silence. A page whose every row fails is a schema fault and
-        refuses outright: returning an empty success there would hide a breaking
-        API change behind "the market was quiet".
-        """
+    ) -> tuple[tuple[MarketplaceListing, ...], list[str], str | None]:
+        """One page: parsed listings, per-row drop reasons, and the next cursor."""
         document = response.json()
-        rows = document.get("data") if isinstance(document, Mapping) else document
+        if isinstance(document, Mapping):
+            rows = document.get("data")
+            raw_cursor = document.get("cursor")
+            next_cursor = raw_cursor if isinstance(raw_cursor, str) and raw_cursor else None
+        else:
+            rows = document
+            next_cursor = None
         if not isinstance(rows, list):
             raise TransportSchemaError("csfloat listings response is not a list")
         listings: list[MarketplaceListing] = []
@@ -335,18 +414,7 @@ class CSFloatAdapter(MarketAdapter):
                 listings.append(self._parse_listing(row, moment, response.payload_sha256))
             except TransportSchemaError as exc:
                 drop_reasons.append(str(exc))
-        if rows and not listings:
-            raise TransportSchemaError(
-                f"csfloat page had no parseable listing out of {len(rows)} rows; "
-                f"first fault: {drop_reasons[0]}"
-            )
-        detail = ""
-        if drop_reasons:
-            detail = (
-                f"{len(drop_reasons)}/{len(rows)} rows dropped by strict parse; "
-                f"first: {drop_reasons[0]}"
-            )
-        return tuple(listings), detail
+        return tuple(listings), drop_reasons, next_cursor
 
     async def fetch_listing_by_id(
         self, listing_id: str, *, moment: datetime

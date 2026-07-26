@@ -239,6 +239,90 @@ class TestCSFloatSuccess:
         assert listing.quality_type is QualityType.STATTRAK
 
 
+class _SequencedTransport:
+    """Returns queued responses in order, recording each request's params.
+
+    FixtureTransport keys by URL alone, which cannot distinguish cursor pages.
+    """
+
+    def __init__(self, responses: list[HttpResponse]) -> None:
+        self._responses = list(responses)
+        self.params: list[dict[str, str]] = []
+
+    async def send(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout_seconds: float = 15.0,
+    ) -> HttpResponse:
+        self.params.append(dict(params or {}))
+        return self._responses.pop(0)
+
+
+def sequenced_adapter(responses: list[HttpResponse]) -> tuple[CSFloatAdapter, _SequencedTransport]:
+    transport = _SequencedTransport(responses)
+    client = RestClient(
+        transport=transport,
+        user_agent="test-agent",
+        retry=RetryPolicy(max_attempts=1),
+    )
+    adapter = CSFloatAdapter(
+        client, api_key="test-key", rarity_by_name=RARITY_MAP, registry=make_registry()
+    )
+    return adapter, transport
+
+
+class TestCSFloatQueryAndPagination:
+    def test_documented_filters_are_sent(self) -> None:
+        from tradeup.domain.money import Currency, Money
+
+        adapter, transport = sequenced_adapter([response({"data": [good_listing()]})])
+        asyncio.run(
+            adapter.fetch_listings(
+                ListingQuery(
+                    rarity=Rarity.MIL_SPEC,
+                    quality=QualityType.NORMAL,
+                    max_price=Money(50_000, Currency.USD),
+                    limit=10,
+                ),
+                moment=NOW,
+            )
+        )
+        sent = transport.params[0]
+        assert sent["type"] == "buy_now"
+        assert sent["sort_by"] == "lowest_price"
+        assert sent["rarity"] == "3"
+        assert sent["category"] == "1"
+        assert sent["max_price"] == "50000"
+        assert sent["limit"] == "10"
+
+    def test_cursor_pagination_follows_documented_pages(self) -> None:
+        adapter, transport = sequenced_adapter(
+            [
+                response({"data": [good_listing("L-1")], "cursor": "page-2"}),
+                response({"data": [good_listing("L-2")], "cursor": ""}),
+            ]
+        )
+        result = asyncio.run(adapter.fetch_listings(ListingQuery(limit=100), moment=NOW))
+        assert result.ok
+        assert [entry.identity.listing_id for entry in result.unwrap()] == ["L-1", "L-2"]
+        assert "cursor" not in transport.params[0]
+        assert transport.params[1]["cursor"] == "page-2"
+        assert "2 page(s)" in result.detail
+
+    def test_pagination_stops_at_the_requested_limit(self) -> None:
+        adapter, transport = sequenced_adapter(
+            [response({"data": [good_listing("L-1")], "cursor": "page-2"})]
+        )
+        result = asyncio.run(adapter.fetch_listings(ListingQuery(limit=1), moment=NOW))
+        assert result.ok
+        assert len(result.unwrap()) == 1
+        assert len(transport.params) == 1  # the second page was never requested
+
+
 class TestCSFloatFailsClosed:
     @pytest.mark.parametrize(
         "missing",
@@ -304,7 +388,7 @@ class TestCSFloatFailsClosed:
         )
         result = fetch(adapter)
         assert not result.ok
-        assert "no parseable listing" in result.detail
+        assert "none parsed" in result.detail
 
     def test_a_missing_registry_refuses(self) -> None:
         """Without the registry there is no identity authority; nothing may parse."""

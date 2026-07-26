@@ -250,3 +250,32 @@ and the demo artifact's `crypto_settlement` section (synthetic rate and fees,
 labelled as such). The volatility haircut and amortisation horizon are stated
 priors; no real venue's crypto fee schedule has been sourced yet, and the source
 matrix records exactly that.
+
+---
+
+## D-018 — Live scanning prices exits from Skinport sales, at CSFloat-truth inputs
+
+**Uncertainty removed.** Whether a live shadow scan can produce fee-net EV without
+a paid price aggregator. It can: CSFloat buy-now listings (documented filters,
+measured 200/window rate budget, measured 40-listing page ceiling) supply exact
+inputs, Skinport's keyless documented sales-history API supplies completed-sale
+output evidence, and both venues' exit fees have dated public sources encoded in
+`valuation/venue_fees.py` with their provenance.
+
+**Enables.** `tradeup candidates scan-live`: one-command read-only measurement of
+opportunity frequency. First runs (2026-07-26) measured: 120 lowest-price MIL_SPEC
+listings → 21 bundles solved → 10 candidates, all rejected BELOW_DISCOVERY_ROI at
+−51% to −77% net. Zero qualifying opportunities at the market floor is a result.
+
+**Also surfaced by going live.** Budget truncation was discarding the only
+feasible float budget (fixed: truncate from the tight end, keep the loose end);
+exact rationals from 17-digit live floats overflowed int64 columns (fixed:
+average_normalized persists as text, migration c7d02be51f44); the documented
+limit=50 page size draws a 429 from an unheadered limiter (fixed: page size 40,
+recorded as measurement).
+
+**Would make it unnecessary.** Nothing; this is the measurement instrument.
+
+**Evidence.** Live scan artifacts under `artifacts/reports/live-scan-*.{md,json}`,
+contract tests for the Skinport source and CSFloat pagination, and the
+source-matrix entries dated 2026-07-26.

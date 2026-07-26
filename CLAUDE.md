@@ -134,6 +134,7 @@ collection membership *and* float caps.
 | CSFloat | `UNSUPPORTED` | Read/verify only. **No documented purchase endpoint exists.** |
 | DMarket | `AUTOMATED`, gated | Ed25519 signing. Purchase unimplemented while two official sources disagree on the endpoint surface. |
 | SkinSnipe | `UNSUPPORTED` | Price reference only. Never execution truth. |
+| Skinport | n/a | Keyless documented API. Completed-sale price evidence + sourced exit fees; 8 req/5 min, Brotli required. Never execution truth. |
 | TradeUpSpy | manual | No API; `robots.txt` disallows the calculator paths. Parity runs off manual exports. |
 | CS.MONEY, SkinSwap | operator | Manual link only. |
 | Steam | `POLICY_BLOCKED` | Human only. |
