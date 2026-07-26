@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local state -- never commit secrets or operational databases
+.env
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated evidence. The directories are tracked via .gitkeep; contents are not.
+artifacts/evidence/*
+artifacts/reports/*
+!artifacts/evidence/.gitkeep
+!artifacts/reports/.gitkeep
