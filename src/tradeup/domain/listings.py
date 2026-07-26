@@ -40,7 +40,19 @@ class ListingStatus(enum.StrEnum):
 
     @property
     def is_purchasable(self) -> bool:
+        """Present *and* still at the price we quoted."""
         return self is ListingStatus.ACTIVE
+
+    @property
+    def is_present(self) -> bool:
+        """The asset still exists at the venue, whatever it now costs.
+
+        Distinct from :attr:`is_purchasable` because "gone" and "repriced" are
+        different market events with different implications. Collapsing them would
+        make the revalidation census -- the main thing a shadow run measures --
+        report vanishing supply where there was only a price move.
+        """
+        return self in {ListingStatus.ACTIVE, ListingStatus.PRICE_CHANGED}
 
 
 class TradableStatus(enum.StrEnum):

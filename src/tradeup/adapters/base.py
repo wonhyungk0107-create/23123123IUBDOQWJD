@@ -76,7 +76,13 @@ class ListingVerification:
 
     @property
     def is_active(self) -> bool:
+        """Still purchasable at the originally quoted price."""
         return self.status.is_purchasable
+
+    @property
+    def is_present(self) -> bool:
+        """Still exists at the venue, even if the price moved."""
+        return self.status.is_present
 
     def price_changed_from(self, expected: Money) -> bool:
         return self.price is not None and self.price != expected
