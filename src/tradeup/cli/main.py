@@ -218,6 +218,10 @@ def candidates_scan(
 @candidates_app.command("prospects")
 def candidates_prospects(
     top: Annotated[int, typer.Option(help="How many ranked prospects to print.")] = 15,
+    ask_haircut: Annotated[
+        str | None,
+        typer.Option(help="Override the ask haircut (e.g. from 'candidates calibration')."),
+    ] = None,
     output: Annotated[Path | None, typer.Option(help="Directory for artifacts.")] = None,
 ) -> None:
     """Catalog-wide trade-up prospect sweep from documented, keyless price data.
@@ -227,11 +231,13 @@ def candidates_prospects(
     probabilities and fee-net estimates over those asks. Prospects are LEADS for
     the exact-listing scanner, never executable truth.
     """
+    from decimal import Decimal
+
     import httpx
 
     from tradeup.adapters.http import HttpxTransport, RestClient, RetryPolicy
     from tradeup.adapters.skinport import SkinportPriceSource
-    from tradeup.discovery.prospects import sweep_prospects
+    from tradeup.discovery.prospects import ProspectPolicy, sweep_prospects
     from tradeup.reporting.renderers import write_json
     from tradeup.valuation.venue_fees import build_live_fee_schedule
 
@@ -262,6 +268,9 @@ def candidates_prospects(
     quotes = result.unwrap()
     typer.echo(f"priced catalogue: {result.detail}")
 
+    policy = ProspectPolicy(ask_haircut=Decimal(ask_haircut)) if ask_haircut is not None else None
+    if policy is not None:
+        typer.echo(f"ask haircut override: {policy.ask_haircut} (from calibration)")
     prospects, statistics = sweep_prospects(
         registry=registry,
         ruleset=ruleset,
@@ -269,6 +278,7 @@ def candidates_prospects(
         fee_schedule=build_live_fee_schedule(),
         base_currency=settings.base_currency,
         moment=now,
+        policy=policy,
         max_cost=settings.max_contract_cost,
     )
 
@@ -321,6 +331,115 @@ def candidates_prospects(
             f"--min-price-minor {max(cheapest - 50, 1)} "
             f"--max-price-minor {dearest + 100} --limit 120"
         )
+
+
+def _echo_calibration(calibration: Any, history_rows: int) -> None:
+    from tradeup.discovery.calibration import MIN_RELIABLE_SAMPLES
+
+    typer.echo(f"\nCALIBRATION (over {history_rows} recorded confirmations)")
+    if not calibration.has_data:
+        typer.echo("  no CONFIRMED estimate/exact pairs recorded yet")
+        return
+    header = (
+        f"  {'scope':<12}{'samples':>8}{'value_ratio':>13}{'roi_gap':>10}"
+        f"{'rec_haircut':>13}{'reliable':>10}"
+    )
+    typer.echo(header)
+    rows = [("ALL", calibration.overall)] + [
+        (entry.quality.value, entry) for entry in calibration.by_quality
+    ]
+    for label, entry in rows:
+        summary = entry.summary()
+        typer.echo(
+            f"  {label:<12}{summary['samples']:>8}{summary['median_value_ratio']:>13}"
+            f"{summary['median_roi_gap']:>10}{summary['recommended_ask_haircut']:>13}"
+            f"{summary['reliable']:>10}"
+        )
+    typer.echo(
+        f"  recommendations with fewer than {MIN_RELIABLE_SAMPLES} samples are anecdotes; "
+        "apply one explicitly via 'candidates prospects --ask-haircut <value>'"
+    )
+
+
+@candidates_app.command("confirm-batch")
+def candidates_confirm_batch(
+    top: Annotated[int, typer.Option(help="Distinct leads to confirm this batch.")] = 5,
+    min_roi: Annotated[
+        str, typer.Option(help="Only confirm leads at or above this estimated ROI.")
+    ] = "0",
+    per_name_limit: Annotated[
+        int, typer.Option(help="Exact listings to fetch per input name.")
+    ] = 15,
+    max_candidates: Annotated[int, typer.Option(help="Cap on candidates per lead.")] = 5,
+    output: Annotated[Path | None, typer.Option(help="Directory for artifacts.")] = None,
+) -> None:
+    """Sweep, confirm the top distinct leads against exact listings, calibrate.
+
+    Every lead's estimate/exact pair is persisted append-only; the calibration
+    report at the end covers the entire recorded history, not just this batch.
+    """
+    from decimal import Decimal
+
+    from tradeup.pipeline.confirm_batch import run_confirmation_batch
+    from tradeup.pipeline.live_scan import LiveScanError
+
+    settings = _settings()
+    _echo_boundary(settings)
+    typer.echo(
+        "LIVE read-only confirm-and-calibrate batch. Estimates come from asks; "
+        "confirmations run on exact purchasable listings and exact floats.\n"
+    )
+    try:
+        result = run_confirmation_batch(
+            settings=settings,
+            clock=_now,
+            top=top,
+            min_estimated_roi=Decimal(min_roi),
+            per_name_limit=per_name_limit,
+            max_candidates=max_candidates,
+            output_dir=output,
+        )
+    except LiveScanError as exc:
+        typer.echo(f"batch blocked: {exc}")
+        raise typer.Exit(1) from exc
+
+    typer.echo("SWEEP CENSUS")
+    for key, value in result.sweep_statistics.summary().items():
+        typer.echo(f"  {key:<28} {value}")
+
+    typer.echo(f"\nCONFIRMATIONS ({len(result.outcomes)} leads)")
+    header = (
+        f"  {'Collection':<38}{'Quality':<10}{'Wear':<16}{'Est ROI':>10}"
+        f"{'Exact ROI':>11}  {'Status':<12}{'Reasons'}"
+    )
+    typer.echo(header)
+    typer.echo("  " + "-" * (len(header) + 8))
+    for outcome in result.outcomes:
+        row = outcome.summary_row()
+        typer.echo(
+            f"  {row['collection'][:36]:<38}{row['quality']:<10}{row['wear']:<16}"
+            f"{row['est_roi']:>10}{row['exact_roi']:>11}  {row['status']:<12}{row['reasons']}"
+        )
+
+    _echo_calibration(result.calibration, result.history_rows)
+    typer.echo("\nNothing was bought; every confirmation is a read-only measurement.")
+
+
+@candidates_app.command("calibration")
+def candidates_calibration() -> None:
+    """Report the recorded estimate-versus-executable gap distribution."""
+    from tradeup.discovery.calibration import build_calibration_report
+    from tradeup.persistence.repositories import ConfirmationRepository
+    from tradeup.pipeline.confirm_batch import calibration_pairs
+
+    settings = _settings()
+    database = create_database(settings.database_url)
+    database.create_all()
+    with database.session() as session:
+        rows = ConfirmationRepository(session).all_rows()
+    database.dispose()
+    report = build_calibration_report(calibration_pairs(rows))
+    _echo_calibration(report, len(rows))
 
 
 @candidates_app.command("confirm")

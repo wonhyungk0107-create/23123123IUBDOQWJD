@@ -50,7 +50,7 @@ through the project venv's own launchers, and the exact commands are recorded in
 
 ## Tests
 
-**533 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
+**544 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
 The opt-in live suite (`pytest -m live`) additionally passed 6/6 on 2026-07-26 with
 real credentials, and live shadow scans ran end to end — see Live checks.
 
@@ -64,7 +64,7 @@ real credentials, and live shadow scans ran end to end — see Live checks.
 
 ## Coverage
 
-Overall **85.5%** (floor 80%; the live-scan orchestration module is exercised by
+Overall **84.7%** (floor 80%; the live-scan orchestration module is exercised by
 the live runs rather than the mandatory suite). Money-critical modules, floor 90%:
 
 | Module | Branch coverage |
@@ -273,14 +273,31 @@ aspirations; sale medians at the low quantile, fee-net, are not. That ~556-point
 estimate-versus-executable gap is the first calibration data point for the
 sweep's haircuts.
 
+### The confirm-and-calibrate loop — 2026-07-26 (third pass)
+
+`tradeup candidates confirm-batch` now automates the whole cycle: sweep →
+deduplicate the board into distinct leads → confirm each against exact listings
+→ **persist every estimate/exact pair append-only** (`prospect_confirmations`,
+migration `e19f4a86d2c7`) → report the calibration over the full recorded
+history. `tradeup candidates calibration` reports it standalone; each pair's
+implied haircut is derived against the haircut in force when its estimate was
+made (`h' = 1 − fee − r·(1 − fee − h)`), medians take the conservative side,
+and recommendations under 10 samples are labelled anecdotes.
+
+First batch, measured: three distinct leads (Genesis ST WW, Arabesque WW,
+Fever ST WW), estimates +407% to +528%, exact results **−25.16% to −70.00%**,
+all CONFIRMED/BELOW_DISCOVERY_ROI. Median value ratio 0.17 → recommended ask
+haircut **≈0.78** (n=3, explicitly unreliable). Applied via
+`candidates prospects --ask-haircut 0.78`, the board compresses from +528% to
+**+9.52%** at the top — estimate and measurement now live in the same universe,
+which is what the flywheel is for.
+
 ## The single highest-value next task
 
-**Run the confirm loop over the top-N prospects and record the gap
-distribution.** One confirmation is an anecdote; fifty are a calibration curve.
-Confirm the top prospects across several sweeps (respecting the measured
-CSFloat 200/window and Skinport 8-per-5-minutes budgets), persist
-estimated-versus-exact ROI pairs, and refit the sweep's ask haircut from the
-measured gap so the ranked board starts predicting what the gates will actually
-say. Any lead that survives discovery then feeds revalidation — the
-listing-survival measurement that calibrates the bundle-completion prior, still
-the least-evidenced number in the model.
+**Accumulate the calibration curve.** Run `confirm-batch` a few times a day
+(each batch of 3 respects both measured API budgets without pausing) until the
+per-quality recommendations cross the 10-sample reliability bar, re-sweeping
+under the fitted haircut as it firms up. When a lead clears discovery under the
+calibrated estimate *and* survives the exact-listing gates, revalidation starts
+producing the listing-survival measurement that calibrates the
+bundle-completion prior — still the least-evidenced number in the model.

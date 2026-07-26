@@ -50,7 +50,7 @@
   "coverage": {
     "critical_module_floor_percent": 90.0,
     "overall_floor_percent": 80.0,
-    "overall_percent": 85.5,
+    "overall_percent": 84.7,
     "per_critical_module": {
       "src/tradeup/domain/conversion.py": "100.0%",
       "src/tradeup/domain/fees.py": "91.5%",
@@ -85,7 +85,7 @@
     "platform": "Windows-11-10.0.26200-SP0",
     "python": "3.12.13"
   },
-  "generated_at": "2026-07-26T07:48:15.071367+00:00",
+  "generated_at": "2026-07-26T07:58:35.251469+00:00",
   "generated_by": "tools/write_verification.py",
   "live_checks": {
     "performed_by_this_tool": false,
@@ -106,7 +106,7 @@
     "rejection_census": "ASSET_ALREADY_RESERVED=12;BELOW_DISCOVERY_ROI=19;BELOW_MIN_ABSOLUTE_PROFIT=2;LISTING_DISAPPEARED=13;LISTING_PRICE_CHANGED=12;QUOTE_TOO_OLD=28"
   },
   "tests": {
-    "count": 533,
+    "count": 544,
     "hypothesis_mode": "derandomize",
     "network_required": false
   }

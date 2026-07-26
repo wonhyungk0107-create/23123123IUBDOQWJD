@@ -255,6 +255,47 @@ class CandidateRejectionRow(Base):
     candidate: Mapped[CandidateRow] = relationship(back_populates="rejections")
 
 
+class ProspectConfirmationRow(Base):
+    """One prospect estimate paired with its exact-listing confirmation.
+
+    Append-only. These rows are the calibration dataset: the distribution of
+    estimated-versus-executable ROI is what turns the sweep's ask haircut from a
+    stated prior into a fitted number.
+    """
+
+    __tablename__ = "prospect_confirmations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    rule_version: Mapped[str] = mapped_column(String(128))
+
+    # -- the lead, as the sweep stated it -----------------------------------
+    collection_id: Mapped[str] = mapped_column(String(256), index=True)
+    counts_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    input_rarity: Mapped[str] = mapped_column(String(32))
+    quality: Mapped[str] = mapped_column(String(32), index=True)
+    input_wear: Mapped[str] = mapped_column(String(32))
+    estimated_cost_minor: Mapped[int] = mapped_column(BigInteger)
+    estimated_output_value_minor: Mapped[int] = mapped_column(BigInteger)
+    estimated_ev_minor: Mapped[int] = mapped_column(BigInteger)
+    estimated_roi: Mapped[str] = mapped_column(String(64))
+    #: The ask haircut in force when the estimate was made; the calibration must
+    #: relate each pair to its own assumptions, not to today's policy.
+    estimated_ask_haircut: Mapped[str] = mapped_column(String(32))
+
+    # -- what the exact-listing confirmation found --------------------------
+    #: CONFIRMED | NO_LISTINGS | NO_BUNDLE | FAILED
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    listings_found: Mapped[int] = mapped_column(Integer, default=0)
+    candidate_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    exact_cost_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    exact_output_value_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    exact_ev_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    exact_roi: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rejection_reasons: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
 class ReservationRow(Base):
     """A claim on a listing.
 

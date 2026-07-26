@@ -36,6 +36,7 @@ from tradeup.persistence.models import (
     LedgerEventRow,
     ListingRow,
     MetadataSnapshotRow,
+    ProspectConfirmationRow,
     ReservationRow,
     ScanRow,
 )
@@ -295,6 +296,30 @@ class CandidateRepository:
             .where(CandidateEvaluationRow.candidate_id == candidate_id)
             .order_by(CandidateEvaluationRow.evaluated_at.desc())
             .limit(1)
+        )
+
+
+class ConfirmationRepository:
+    """Append-only estimate-versus-executable pairs. The calibration dataset."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def record(self, row: ProspectConfirmationRow) -> ProspectConfirmationRow:
+        self._session.add(row)
+        self._session.flush()
+        return row
+
+    def count(self) -> int:
+        return len(list(self._session.scalars(select(ProspectConfirmationRow))))
+
+    def all_rows(self) -> list[ProspectConfirmationRow]:
+        return list(
+            self._session.scalars(
+                select(ProspectConfirmationRow).order_by(
+                    ProspectConfirmationRow.confirmed_at, ProspectConfirmationRow.id
+                )
+            )
         )
 
 
