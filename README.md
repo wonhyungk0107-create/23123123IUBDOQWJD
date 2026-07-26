@@ -59,6 +59,7 @@ uv run pytest
 | [`docs/economic-model.md`](docs/economic-model.md) | EV, fees, gates, capital model |
 | [`docs/source-matrix.md`](docs/source-matrix.md) | Per-venue capabilities and evidence |
 | [`docs/rule-registry.md`](docs/rule-registry.md) | Trade-up rule versions and provenance |
+| [`docs/tradeup-mechanics-reference.md`](docs/tradeup-mechanics-reference.md) | Operator-supplied mechanics reference (verified against the registry) |
 | [`docs/security-boundaries.md`](docs/security-boundaries.md) | What this system must never do |
 | [`docs/operator-runbook.md`](docs/operator-runbook.md) | Manual operator procedure |
 | [`docs/decision-log.md`](docs/decision-log.md) | Design decisions and what they de-risk |

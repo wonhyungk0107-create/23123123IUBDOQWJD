@@ -87,6 +87,19 @@ gate with `UNVERIFIED_RULESET`.
 Promoting either to `VERIFIED_AGAINST_SOURCE` requires a dated citation added to
 `source_references` and a matching `validated_at`.
 
+**Corroboration (2026-07-26, not a promotion):** an operator-supplied community
+reference, `docs/tradeup-mechanics-reference.md`, was verified against the
+implementation. Its four core rules — same-rarity ten-input contracts,
+`n_c/(N·k_c)` collection weighting, output float from the *adjusted/normalised*
+input average mapped into the output skin's own range, and the wear-band table —
+agree with `2026-05-souvenir-covert` exactly, and its worked example reproduces
+bit-for-bit (`external_reference_3_7_worked_example` in the golden fixtures:
+average `1041/7000`, per-skin probabilities `3/50` and `7/50`, output float
+`0.148714285714`, Minimal Wear). The reference is undated and not
+Valve-authoritative, so the status stays `GOLDEN_FIXTURE_ONLY`; it also omits
+souvenir handling, the five-input Covert contract, and the Extraordinary tier,
+all of which this registry models explicitly.
+
 ## Metadata provenance
 
 Item identity, float caps, collection membership and output pools come from a pinned

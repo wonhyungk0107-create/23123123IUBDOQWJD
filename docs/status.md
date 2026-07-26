@@ -50,7 +50,7 @@ through the project venv's own launchers, and the exact commands are recorded in
 
 ## Tests
 
-**544 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
+**550 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
 The opt-in live suite (`pytest -m live`) additionally passed 6/6 on 2026-07-26 with
 real credentials, and live shadow scans ran end to end — see Live checks.
 
@@ -59,7 +59,7 @@ real credentials, and live shadow scans ran end to end — see Live checks.
 | `tests/unit/` | Money, crypto currencies, conversion quotes, settlement rail, items, rules, mathematics, fees, valuation, EV, policy, inventory, ledger, reservations, metadata, discovery, optimizer |
 | `tests/property/` | Optimizer vs brute force, pruning soundness, float-budget and unique-asset invariants |
 | `tests/contract/` | Adapter success, empty, missing fields, invalid float, unmapped rarity, schema change, 401, 429 + `Retry-After`, 5xx, timeout, disappearance, price change, DMarket signing, policy-blocked venues |
-| `tests/golden/` | Seven hand-computed trade-up cases across both rule versions |
+| `tests/golden/` | Eight hand-computed trade-up cases across both rule versions, including an external-reference worked example |
 | `tests/integration/` | Migrations, idempotent ingestion, unique identity, immutable ledger, candidate replay, full demo, reproducibility |
 
 ## Coverage

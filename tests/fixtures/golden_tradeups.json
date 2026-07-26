@@ -165,6 +165,36 @@
       "collections": {"col-a": 5, "col-b": 5},
       "pools": {"col-a": ["shared"], "col-b": ["shared"]},
       "expected_probabilities": {"shared": "1"}
+    },
+    {
+      "id": "external_reference_3_7_worked_example",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "Worked example from docs/tradeup-mechanics-reference.md (operator-supplied community reference, 2026-07-26): three inputs at adjusted float 2/7 (raw 0.20 in a [0, 0.70] cap) plus seven at 9/100, two five-output collections. The reference states 6%/14% per skin and output float 0.14871428571... (Minimal Wear); expected values here are the exact rationals behind its decimals, computed by hand: average = (3*(2/7) + 7*(9/100))/10 = 1041/7000.",
+      "inputs": [
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "0.70"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "0.70"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "0.70"},
+        {"raw_float": "0.09", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.09", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.09", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.09", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.09", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.09", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.09", "min_float": "0.00", "max_float": "1.00"}
+      ],
+      "expected_average_normalized": "1041/7000",
+      "output": {"min_float": "0.00", "max_float": "1.00"},
+      "expected_output_float": "0.148714285714",
+      "expected_output_wear": "MINIMAL_WEAR",
+      "collections": {"broken-fang": 3, "recoil": 7},
+      "pools": {
+        "broken-fang": ["bf1", "bf2", "bf3", "bf4", "bf5"],
+        "recoil": ["rc1", "rc2", "rc3", "rc4", "rc5"]
+      },
+      "expected_probabilities": {
+        "bf1": "3/50", "bf2": "3/50", "bf3": "3/50", "bf4": "3/50", "bf5": "3/50",
+        "rc1": "7/50", "rc2": "7/50", "rc3": "7/50", "rc4": "7/50", "rc5": "7/50"
+      }
     }
   ]
 }

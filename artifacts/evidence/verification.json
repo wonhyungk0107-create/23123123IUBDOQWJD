@@ -85,7 +85,7 @@
     "platform": "Windows-11-10.0.26200-SP0",
     "python": "3.12.13"
   },
-  "generated_at": "2026-07-26T08:09:42.371164+00:00",
+  "generated_at": "2026-07-26T18:10:31.074820+00:00",
   "generated_by": "tools/write_verification.py",
   "live_checks": {
     "performed_by_this_tool": false,
@@ -106,7 +106,7 @@
     "rejection_census": "ASSET_ALREADY_RESERVED=12;BELOW_DISCOVERY_ROI=19;BELOW_MIN_ABSOLUTE_PROFIT=2;LISTING_DISAPPEARED=13;LISTING_PRICE_CHANGED=12;QUOTE_TOO_OLD=28"
   },
   "tests": {
-    "count": 544,
+    "count": 550,
     "hypothesis_mode": "derandomize",
     "network_required": false
   }

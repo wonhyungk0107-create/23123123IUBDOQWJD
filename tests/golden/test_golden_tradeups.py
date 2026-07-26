@@ -130,6 +130,7 @@ def test_the_golden_file_covers_the_required_shapes() -> None:
     assert "boundary_float_lands_in_higher_wear_band" in ids
     assert "restricted_input_range_normalisation" in ids
     assert "capped_output_cannot_beat_field_tested" in ids
+    assert "external_reference_3_7_worked_example" in ids
 
 
 def test_legacy_ruleset_still_reproduces_the_ten_input_maths() -> None:
