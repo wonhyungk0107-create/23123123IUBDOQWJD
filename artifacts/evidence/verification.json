@@ -50,7 +50,7 @@
   "coverage": {
     "critical_module_floor_percent": 90.0,
     "overall_floor_percent": 80.0,
-    "overall_percent": 86.0,
+    "overall_percent": 86.1,
     "per_critical_module": {
       "src/tradeup/domain/conversion.py": "100.0%",
       "src/tradeup/domain/fees.py": "91.5%",
@@ -85,11 +85,11 @@
     "platform": "Windows-11-10.0.26200-SP0",
     "python": "3.12.13"
   },
-  "generated_at": "2026-07-26T05:26:20.701791+00:00",
+  "generated_at": "2026-07-26T06:23:52.858181+00:00",
   "generated_by": "tools/write_verification.py",
   "live_checks": {
-    "performed": false,
-    "reason": "No marketplace credentials are configured in this environment. `make live-smoke` skips cleanly; no live read has been performed against CSFloat, DMarket or SkinSnipe."
+    "performed_by_this_tool": false,
+    "reason": "Live checks are opt-in (`pytest -m live`) and never part of the mandatory gates this tool runs. Live results and dates are recorded in docs/status.md."
   },
   "metadata": {
     "projection_entry_count": 1455,
@@ -106,7 +106,7 @@
     "rejection_census": "ASSET_ALREADY_RESERVED=12;BELOW_DISCOVERY_ROI=19;BELOW_MIN_ABSOLUTE_PROFIT=2;LISTING_DISAPPEARED=13;LISTING_PRICE_CHANGED=12;QUOTE_TOO_OLD=28"
   },
   "tests": {
-    "count": 489,
+    "count": 495,
     "hypothesis_mode": "derandomize",
     "network_required": false
   }

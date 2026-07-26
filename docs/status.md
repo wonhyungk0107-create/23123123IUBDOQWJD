@@ -50,7 +50,9 @@ through the project venv's own launchers, and the exact commands are recorded in
 
 ## Tests
 
-**489 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
+**495 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
+The opt-in live suite (`pytest -m live`) additionally passed 6/6 on 2026-07-26 with
+real credentials — see Live checks.
 
 | Suite | Covers |
 |---|---|
@@ -62,7 +64,7 @@ through the project venv's own launchers, and the exact commands are recorded in
 
 ## Coverage
 
-Overall **86.0%** (floor 80%). Money-critical modules, floor 90%:
+Overall **86.1%** (floor 80%). Money-critical modules, floor 90%:
 
 | Module | Branch coverage |
 |---|---|
@@ -149,9 +151,25 @@ the software works, and it is not evidence about the market.
 
 ## Live checks
 
-**None performed.** No marketplace credentials are configured in this environment, so
-no live read has been made against CSFloat, DMarket or SkinSnipe. `make live-smoke`
-skips cleanly. Nothing in this repository has ever authenticated to a marketplace.
+**First authenticated read-only contact: 2026-07-26, CSFloat.** With a real API key
+configured, `pytest -m live` passed 6/6 (no skips) and direct probes exercised
+`GET /api/v1/listings` and single-listing revalidation. Read-only throughout; no
+order was or can be placed (`live_execution_enabled=false` is asserted inside the
+live suite itself).
+
+The first live read immediately falsified the hand-authored fixture shape — known
+gap #8 doing its job. Live rows carry no `min_float`, `max_float` or `collection`;
+identity is `item_name` + `paint_index`, and listings split into `buy_now` and
+`auction` types. The adapter was rewritten to resolve identity, collection and
+float caps from the pinned registry (fail closed on anything but exactly one
+candidate) and to exclude auction rows, whose current price is a bid, not an ask.
+Post-fix probe: 5 of 25 rows on a default page parsed as purchasable listings, all
+20 drops counted by reason. Details in `docs/source-matrix.md` ("Live response
+shape — VERIFIED 2026-07-26").
+
+**DMarket remains unverified live** — keys are configured, but no live DMarket read
+has been performed; its payload shapes are still hand-authored approximations.
+SkinSnipe has no key and stays a typed refusal.
 
 ## Known gaps and unresolved blockers
 
@@ -176,9 +194,10 @@ skips cleanly. Nothing in this repository has ever authenticated to a marketplac
    documentation repository. No purchase call is implemented while that stands.
 7. **CSFloat has no documented purchase endpoint**, so acquisition there is an
    operator action, not a configuration change.
-8. **Adapter payload shapes are unverified against live responses.** Contract tests
-   pin our parsing against hand-authored approximations of the documented shapes. A
-   read-only live smoke run is required before trusting a real response.
+8. **Adapter payload shapes: CSFloat verified live, DMarket not.** The CSFloat
+   fetch/verify shape was corrected against a real authenticated response on
+   2026-07-26 (see Live checks). DMarket parsing is still pinned against
+   hand-authored approximations and needs its own read-only live run.
 9. **No PostgreSQL run has been performed.** The compose profile exists; only SQLite
    has actually been exercised.
 10. **Docker has not been built here** — no Docker daemon in this environment. The

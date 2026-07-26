@@ -243,3 +243,10 @@ class TestSettlementSettings:
         presence = settings.available_credentials()
         assert presence["crypto_wallet_address"] is True
         assert "bc1q" not in str(settings.gate_summary())
+
+    def test_a_blank_env_line_is_not_a_present_credential(self) -> None:
+        """`NAME=` with no value in .env must report absent, not present."""
+        settings = crypto_settings(crypto_wallet_address="", skinsnipe_api_key="   ")
+        presence = settings.available_credentials()
+        assert presence["crypto_wallet_address"] is False
+        assert presence["skinsnipe_api_key"] is False

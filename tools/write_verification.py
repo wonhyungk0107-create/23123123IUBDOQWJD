@@ -143,11 +143,11 @@ def main() -> int:
             "artifacts_dir": "artifacts/evidence/",
         },
         "live_checks": {
-            "performed": False,
+            "performed_by_this_tool": False,
             "reason": (
-                "No marketplace credentials are configured in this environment. "
-                "`make live-smoke` skips cleanly; no live read has been performed "
-                "against CSFloat, DMarket or SkinSnipe."
+                "Live checks are opt-in (`pytest -m live`) and never part of the "
+                "mandatory gates this tool runs. Live results and dates are "
+                "recorded in docs/status.md."
             ),
         },
         "economic_evidence": {

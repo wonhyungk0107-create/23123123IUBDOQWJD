@@ -61,6 +61,10 @@ def _requires(name: str, value: object) -> None:
 async def _csfloat_call(settings: Settings, coro_name: str, *args: object) -> object:
     import httpx
 
+    from tradeup.demo.runner import default_metadata_path
+    from tradeup.metadata.bymykel import load_pinned_snapshot
+
+    registry = load_pinned_snapshot(default_metadata_path(), imported_at=datetime.now(UTC)).registry
     async with httpx.AsyncClient() as client:
         rest = RestClient(
             transport=HttpxTransport(client, clock=lambda: datetime.now(UTC)),
@@ -79,6 +83,7 @@ async def _csfloat_call(settings: Settings, coro_name: str, *args: object) -> ob
                 settings.csfloat_api_key.get_secret_value() if settings.csfloat_api_key else None
             ),
             rarity_by_name=RARITY_MAP,
+            registry=registry,
         )
         method = getattr(adapter, coro_name)
         return await method(*args, moment=datetime.now(UTC))

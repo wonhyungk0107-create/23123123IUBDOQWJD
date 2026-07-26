@@ -1,9 +1,10 @@
 """Adapter contract tests.
 
-Recorded payloads are hand-authored approximations of each venue's documented shape,
-not captures of live traffic — this environment has no credentials for any of them.
-That distinction matters: these tests pin *our* parsing and failure behaviour, and a
-live smoke run is still required before trusting a real response.
+The CSFloat fixture shape was verified against a live authenticated read on
+2026-07-26 (see docs/source-matrix.md): rows carry ``type``/``state`` and an item
+with ``item_name``/``paint_index`` but no collection or float caps, which the
+registry supplies. The DMarket payloads remain hand-authored approximations of the
+documented shape — a live smoke run is still required before trusting them.
 
 The behaviour under test is uniformly "fail closed". Every malformed, partial or
 surprising payload must produce a typed refusal, never a listing with a plausible
@@ -39,8 +40,9 @@ from tradeup.adapters.manual import (
     skins_money_adapter,
 )
 from tradeup.domain.execution import CapabilityStatus, ExecutionMode
-from tradeup.domain.items import Rarity
+from tradeup.domain.items import Collection, FloatRange, QualityType, Rarity, Skin
 from tradeup.domain.listings import ListingIdentity
+from tradeup.metadata.registry import MetadataRegistry
 
 NOW = datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC)
 LISTINGS_URL = f"{CSFLOAT_BASE_URL}/listings"
@@ -49,6 +51,34 @@ RARITY_MAP: Mapping[str, Rarity] = {
     "mil-spec grade": Rarity.MIL_SPEC,
     "restricted": Rarity.RESTRICTED,
 }
+
+
+def make_registry() -> MetadataRegistry:
+    """A one-skin registry matching the fixture listing's identity facts."""
+    skin = Skin(
+        skin_id="skin-redline@collection-set-huntsman",
+        name="AK-47 | Redline",
+        market_hash_base="AK-47 | Redline",
+        collection_id="collection-set-huntsman",
+        rarity=Rarity.MIL_SPEC,
+        float_range=FloatRange(Decimal("0.1"), Decimal("0.7")),
+        paint_index=282,
+        available_qualities=frozenset({QualityType.NORMAL, QualityType.STATTRAK}),
+    )
+    return MetadataRegistry(
+        source="test",
+        revision="test-rev",
+        payload_sha256="0" * 64,
+        imported_at=NOW,
+        skins=[skin],
+        collections=[
+            Collection(
+                collection_id="collection-set-huntsman",
+                name="The Huntsman Collection",
+                skin_ids=frozenset({skin.skin_id}),
+            )
+        ],
+    )
 
 
 def response(
@@ -70,19 +100,28 @@ def response(
 
 
 def good_listing(listing_id: str = "L-1") -> dict[str, Any]:
-    """A payload shaped like CSFloat's documented listing object."""
+    """A payload shaped like the live listing object (authenticated read, 2026-07-26).
+
+    Live rows carry no ``min_float``, ``max_float`` or ``collection``; identity is
+    ``item_name`` + ``paint_index``, and the registry supplies the rest.
+    """
     return {
         "id": listing_id,
         "price": 1234,
+        "type": "buy_now",
+        "state": "listed",
         "item": {
             "asset_id": f"asset-{listing_id}",
             "market_hash_name": "AK-47 | Redline (Field-Tested)",
+            "item_name": "AK-47 | Redline",
             "float_value": 0.2345,
-            "min_float": 0.1,
-            "max_float": 0.7,
-            "collection": "collection-set-huntsman",
-            "rarity_name": "Mil-Spec Grade",
             "paint_index": 282,
+            "def_index": 7,
+            "rarity": 4,
+            "rarity_name": "Mil-Spec Grade",
+            "is_stattrak": False,
+            "is_souvenir": False,
+            "type": "skin",
             "paint_seed": 501,
         },
     }
@@ -93,6 +132,7 @@ def csfloat_adapter(
     *,
     api_key: str | None = "test-key",
     sleeper_calls: list[float] | None = None,
+    registry: MetadataRegistry | None = None,
 ) -> CSFloatAdapter:
     async def _sleep(seconds: float) -> None:
         if sleeper_calls is not None:
@@ -106,7 +146,12 @@ def csfloat_adapter(
         random_fn=lambda: 0.5,
         secrets={"api_key": api_key} if api_key else {},
     )
-    return CSFloatAdapter(client, api_key=api_key, rarity_by_name=RARITY_MAP)
+    return CSFloatAdapter(
+        client,
+        api_key=api_key,
+        rarity_by_name=RARITY_MAP,
+        registry=registry if registry is not None else make_registry(),
+    )
 
 
 def fetch(adapter: CSFloatAdapter) -> Any:
@@ -151,11 +196,53 @@ class TestCSFloatSuccess:
         listing = fetch(adapter).unwrap()[0]
         assert isinstance(listing.raw_float, Decimal)
 
+    def test_a_partially_parseable_page_keeps_good_rows_and_counts_drops(self) -> None:
+        """Observed live 2026-07-26: pages mix buy-now and auction rows. A row the
+        strict parse excludes is counted in the detail — never defaulted — and the
+        good rows still reach the scanner."""
+        auction = good_listing("L-auction")
+        auction["type"] = "auction"
+        adapter = csfloat_adapter(
+            {
+                FixtureTransport.key("GET", LISTINGS_URL): response(
+                    {"data": [good_listing(), auction]}
+                )
+            }
+        )
+        result = fetch(adapter)
+        assert result.ok
+        listings = result.unwrap()
+        assert [entry.identity.listing_id for entry in listings] == ["L-1"]
+        assert "1/2 rows dropped" in result.detail
+        assert "bid, not an ask" in result.detail
+
+    def test_identity_resolves_through_the_registry(self) -> None:
+        """Collection and float caps come from the registry, not the payload."""
+        adapter = csfloat_adapter(
+            {FixtureTransport.key("GET", LISTINGS_URL): response({"data": [good_listing()]})}
+        )
+        listing = fetch(adapter).unwrap()[0]
+        assert listing.skin_id == "skin-redline@collection-set-huntsman"
+        assert listing.collection_id == "collection-set-huntsman"
+
+    def test_a_stattrak_prefixed_name_resolves_to_the_base_skin(self) -> None:
+        """CSFloat bakes the quality prefix into the name; the registry does not."""
+        payload = good_listing()
+        payload["item"]["item_name"] = "StatTrak™ AK-47 | Redline"
+        payload["item"]["market_hash_name"] = "StatTrak™ AK-47 | Redline (Field-Tested)"
+        payload["item"]["is_stattrak"] = True
+        adapter = csfloat_adapter(
+            {FixtureTransport.key("GET", LISTINGS_URL): response({"data": [payload]})}
+        )
+        listing = fetch(adapter).unwrap()[0]
+        assert listing.skin_id == "skin-redline@collection-set-huntsman"
+        assert listing.quality_type is QualityType.STATTRAK
+
 
 class TestCSFloatFailsClosed:
     @pytest.mark.parametrize(
         "missing",
-        ["asset_id", "market_hash_name", "float_value", "min_float", "max_float", "collection"],
+        ["asset_id", "market_hash_name", "item_name", "float_value", "rarity_name"],
     )
     def test_missing_required_item_field_refuses(self, missing: str) -> None:
         payload = good_listing()
@@ -175,7 +262,7 @@ class TestCSFloatFailsClosed:
         )
         assert not fetch(adapter).ok
 
-    def test_float_outside_the_stated_range_refuses(self) -> None:
+    def test_float_outside_the_registry_range_refuses(self) -> None:
         """An impossible float is a data fault, not a bargain."""
         payload = good_listing()
         payload["item"]["float_value"] = 0.99
@@ -184,16 +271,55 @@ class TestCSFloatFailsClosed:
         )
         result = fetch(adapter)
         assert not result.ok
-        assert "outside its stated range" in result.detail
+        assert "outside the registry's stated range" in result.detail
 
-    def test_degenerate_float_range_refuses(self) -> None:
+    def test_an_unknown_item_refuses_rather_than_guessing(self) -> None:
         payload = good_listing()
-        payload["item"]["min_float"] = 0.7
-        payload["item"]["max_float"] = 0.7
+        payload["item"]["item_name"] = "Weapon | Not In The Registry"
         adapter = csfloat_adapter(
             {FixtureTransport.key("GET", LISTINGS_URL): response({"data": [payload]})}
         )
-        assert not fetch(adapter).ok
+        result = fetch(adapter)
+        assert not result.ok
+        assert "refusing to guess" in result.detail
+
+    def test_a_paint_index_mismatch_refuses(self) -> None:
+        """Name and paint index must agree; disagreement means wrong identity."""
+        payload = good_listing()
+        payload["item"]["paint_index"] = 999
+        adapter = csfloat_adapter(
+            {FixtureTransport.key("GET", LISTINGS_URL): response({"data": [payload]})}
+        )
+        result = fetch(adapter)
+        assert not result.ok
+        assert "refusing to guess" in result.detail
+
+    def test_an_auction_only_page_refuses(self) -> None:
+        """A page with nothing purchasable at its stated price is a refusal, not
+        an empty success: the market state is unknown, not quiet."""
+        auction = good_listing()
+        auction["type"] = "auction"
+        adapter = csfloat_adapter(
+            {FixtureTransport.key("GET", LISTINGS_URL): response({"data": [auction]})}
+        )
+        result = fetch(adapter)
+        assert not result.ok
+        assert "no parseable listing" in result.detail
+
+    def test_a_missing_registry_refuses(self) -> None:
+        """Without the registry there is no identity authority; nothing may parse."""
+        client_responses = {
+            FixtureTransport.key("GET", LISTINGS_URL): response({"data": [good_listing()]})
+        }
+        client = RestClient(
+            transport=FixtureTransport(client_responses),
+            user_agent="test-agent",
+            retry=RetryPolicy(max_attempts=1),
+        )
+        adapter = CSFloatAdapter(client, api_key="k", rarity_by_name=RARITY_MAP, registry=None)
+        result = fetch(adapter)
+        assert not result.ok
+        assert "no metadata registry" in result.detail
 
     def test_unmapped_rarity_refuses_rather_than_guessing(self) -> None:
         payload = good_listing()

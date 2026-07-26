@@ -249,15 +249,24 @@ class Settings(BaseSettings):
     def reports_dir(self) -> Path:
         return self.artifacts_dir / "reports"
 
+    @staticmethod
+    def _secret_present(secret: SecretStr | None) -> bool:
+        """A blank ``NAME=`` line in ``.env`` arrives as an empty secret, not None.
+
+        Reporting that as "present" would claim a live capability that does not
+        exist, so presence requires a non-whitespace value.
+        """
+        return secret is not None and bool(secret.get_secret_value().strip())
+
     def available_credentials(self) -> dict[str, bool]:
         """Which credentials are present. Values are booleans, never the secrets."""
         return {
-            "csfloat_api_key": self.csfloat_api_key is not None,
-            "dmarket_public_key": self.dmarket_public_key is not None,
-            "dmarket_secret_key": self.dmarket_secret_key is not None,
-            "skinsnipe_api_key": self.skinsnipe_api_key is not None,
-            "telegram_bot_token": self.telegram_bot_token is not None,
-            "crypto_wallet_address": self.crypto_wallet_address is not None,
+            "csfloat_api_key": self._secret_present(self.csfloat_api_key),
+            "dmarket_public_key": self._secret_present(self.dmarket_public_key),
+            "dmarket_secret_key": self._secret_present(self.dmarket_secret_key),
+            "skinsnipe_api_key": self._secret_present(self.skinsnipe_api_key),
+            "telegram_bot_token": self._secret_present(self.telegram_bot_token),
+            "crypto_wallet_address": self._secret_present(self.crypto_wallet_address),
         }
 
     def gate_summary(self) -> dict[str, str]:

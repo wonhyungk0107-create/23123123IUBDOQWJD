@@ -14,6 +14,17 @@ configuration flag someone flips.
 Authentication is a bare ``Authorization: <API-KEY>`` header. No rate limit is
 published; community figures conflict, so none is encoded. The client's generic
 backoff and ``Retry-After`` handling covers 429s without us inventing a number.
+
+Live-verified payload shape (authenticated read, 2026-07-26, recorded in
+docs/source-matrix.md): a listing row carries ``type`` (``buy_now`` or
+``auction``), ``state``, ``price`` (integer cents) and an ``item`` object with
+``item_name``, ``float_value``, ``paint_index``, ``def_index``, ``rarity_name``
+and quality flags. The item does **not** state its collection or float caps, so
+identity, collection and float range are resolved from the pinned metadata
+registry — which the architecture already treats as the only authority for those
+facts. A row that cannot be resolved unambiguously is excluded and counted, never
+guessed at, and only ``buy_now``/``listed`` rows count as purchasable listings:
+an auction's current price is a bid, not an ask.
 """
 
 from __future__ import annotations
@@ -34,7 +45,7 @@ from tradeup.adapters.http import (
     TransportTimeout,
 )
 from tradeup.domain.execution import CapabilityResult, CapabilityStatus, ExecutionMode
-from tradeup.domain.items import QualityType, Rarity
+from tradeup.domain.items import QualityType, Rarity, Skin
 from tradeup.domain.listings import (
     ListingIdentity,
     ListingStatus,
@@ -42,6 +53,7 @@ from tradeup.domain.listings import (
     TradableStatus,
 )
 from tradeup.domain.money import BalanceType, Currency, Money
+from tradeup.metadata.registry import MetadataRegistry
 
 __all__ = ["CSFLOAT_BASE_URL", "CSFloatAdapter"]
 
@@ -87,6 +99,7 @@ class CSFloatAdapter(MarketAdapter):
         api_key: str | None = None,
         base_url: str = CSFLOAT_BASE_URL,
         rarity_by_name: Mapping[str, Rarity] | None = None,
+        registry: MetadataRegistry | None = None,
     ) -> None:
         # live_execution_enabled is deliberately not accepted: no flag can enable a
         # purchase path that the venue does not document.
@@ -95,6 +108,7 @@ class CSFloatAdapter(MarketAdapter):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._rarity_by_name = rarity_by_name or {}
+        self._registry = registry
 
     @property
     def has_credentials(self) -> bool:
@@ -104,6 +118,50 @@ class CSFloatAdapter(MarketAdapter):
         return {"Authorization": self._api_key} if self._api_key else {}
 
     # -- parsing -------------------------------------------------------------
+
+    #: Quality prefixes CSFloat bakes into display names and the registry does not.
+    #: Literal removal only — this is a dictionary-key adjustment, not name parsing.
+    _NAME_PREFIXES = ("StatTrak™ ", "Souvenir ")
+
+    def _resolve_skin(
+        self,
+        listing_id: str,
+        item_name: str,
+        paint_index: int | None,
+        rarity: Rarity,
+        quality: QualityType,
+    ) -> Skin:
+        """Resolve a venue row to exactly one registry skin, or fail closed.
+
+        The registry is the only authority for collection membership and float
+        caps, so identity must land on a registry entry. Candidates come from an
+        exact base-name lookup, then must agree on paint index (when both sides
+        state one), rarity and quality support. Anything other than exactly one
+        surviving candidate is a refusal to guess.
+        """
+        if self._registry is None:
+            raise TransportSchemaError(
+                f"csfloat listing {listing_id} cannot be resolved: no metadata "
+                "registry configured, and identity is registry-authoritative"
+            )
+        candidates = self._registry.skins_named(item_name)
+        if not candidates:
+            for prefix in self._NAME_PREFIXES:
+                if item_name.startswith(prefix):
+                    candidates = self._registry.skins_named(item_name[len(prefix) :])
+                    break
+        if paint_index is not None:
+            stated = [s for s in candidates if s.paint_index is not None]
+            if stated:
+                candidates = tuple(s for s in stated if s.paint_index == paint_index)
+        candidates = tuple(s for s in candidates if s.rarity is rarity and s.supports(quality))
+        if len(candidates) != 1:
+            raise TransportSchemaError(
+                f"csfloat listing {listing_id} identity {item_name!r} "
+                f"(paint {paint_index}, {rarity.value}, {quality.value}) resolved to "
+                f"{len(candidates)} registry skins; refusing to guess"
+            )
+        return candidates[0]
 
     def _parse_listing(
         self, payload: Mapping[str, Any], observed_at: datetime, payload_hash: str
@@ -120,39 +178,38 @@ class CSFloatAdapter(MarketAdapter):
         if not isinstance(listing_id, str) or not listing_id:
             raise TransportSchemaError("csfloat listing has no id")
 
+        listing_type = payload.get("type")
+        if listing_type != "buy_now":
+            raise TransportSchemaError(
+                f"csfloat listing {listing_id} type {listing_type!r} is not purchasable "
+                "at its stated price; an auction's current price is a bid, not an ask"
+            )
+        state = payload.get("state")
+        if state != "listed":
+            raise TransportSchemaError(
+                f"csfloat listing {listing_id} state {state!r} is not an active listing"
+            )
+
         item = payload.get("item")
         if not isinstance(item, Mapping):
             raise TransportSchemaError(f"csfloat listing {listing_id} has no item object")
 
         asset_id = item.get("asset_id")
         market_hash_name = item.get("market_hash_name")
+        item_name = item.get("item_name")
         if not isinstance(asset_id, str) or not asset_id:
             raise TransportSchemaError(f"csfloat listing {listing_id} has no asset_id")
         if not isinstance(market_hash_name, str) or not market_hash_name:
             raise TransportSchemaError(f"csfloat listing {listing_id} has no market_hash_name")
+        if not isinstance(item_name, str) or not item_name:
+            raise TransportSchemaError(f"csfloat listing {listing_id} has no item_name")
 
         raw_float = _decimal(item.get("float_value"), f"listing {listing_id} float_value")
-        min_float = _decimal(item.get("min_float"), f"listing {listing_id} min_float")
-        max_float = _decimal(item.get("max_float"), f"listing {listing_id} max_float")
-        if max_float <= min_float:
-            raise TransportSchemaError(f"csfloat listing {listing_id} has a degenerate float range")
-        normalized = (raw_float - min_float) / (max_float - min_float)
-        if not (Decimal(0) <= normalized <= Decimal(1)):
-            raise TransportSchemaError(
-                f"csfloat listing {listing_id} float {raw_float} is outside its stated range"
-            )
 
         price_raw = payload.get("price")
         if not isinstance(price_raw, int):
             raise TransportSchemaError(
                 f"csfloat listing {listing_id} price is not an integer minor-unit value"
-            )
-
-        collection_id = item.get("collection")
-        if not isinstance(collection_id, str) or not collection_id:
-            raise TransportSchemaError(
-                f"csfloat listing {listing_id} states no collection; it cannot be "
-                "used in a contract and must not be guessed at"
             )
 
         rarity_name = item.get("rarity_name")
@@ -168,13 +225,24 @@ class CSFloatAdapter(MarketAdapter):
         elif item.get("is_souvenir") is True:
             quality = QualityType.SOUVENIR
 
+        paint_index = int(item["paint_index"]) if isinstance(item.get("paint_index"), int) else None
+        skin = self._resolve_skin(listing_id, item_name, paint_index, rarity, quality)
+
+        span = skin.float_range.maximum - skin.float_range.minimum
+        normalized = (raw_float - skin.float_range.minimum) / span
+        if not (Decimal(0) <= normalized <= Decimal(1)):
+            raise TransportSchemaError(
+                f"csfloat listing {listing_id} float {raw_float} is outside the "
+                f"registry's stated range for {skin.skin_id}"
+            )
+
         return MarketplaceListing(
             identity=ListingIdentity(VENUE, listing_id),
             asset_id=asset_id,
-            skin_id=f"{item.get('paint_index', 'unknown')}@{collection_id}",
+            skin_id=skin.skin_id,
             market_hash_name=market_hash_name,
-            collection_id=collection_id,
-            rarity=rarity,
+            collection_id=skin.collection_id,
+            rarity=skin.rarity,
             quality_type=quality,
             raw_float=raw_float,
             normalized_float=normalized,
@@ -187,9 +255,7 @@ class CSFloatAdapter(MarketAdapter):
             listing_status=ListingStatus.ACTIVE,
             tradable_status=TradableStatus.TRADABLE,
             raw_payload_hash=payload_hash,
-            paint_index=(
-                int(item["paint_index"]) if isinstance(item.get("paint_index"), int) else None
-            ),
+            paint_index=paint_index,
             paint_seed=int(item["paint_seed"]) if isinstance(item.get("paint_seed"), int) else None,
         )
 
@@ -238,19 +304,49 @@ class CSFloatAdapter(MarketAdapter):
             response = await self._client.get(
                 f"{self._base_url}/listings", params=params, headers=self._headers()
             )
-            listings = self._parse_listings_response(response, moment)
+            listings, detail = self._parse_listings_response(response, moment)
         except TransportError as exc:
             return self._failure("fetch_listings", moment, exc)
-        return CapabilityResult.succeeded(self.venue, "fetch_listings", moment, listings)
+        return CapabilityResult.succeeded(
+            self.venue, "fetch_listings", moment, listings, detail=detail
+        )
 
     def _parse_listings_response(
         self, response: HttpResponse, moment: datetime
-    ) -> tuple[MarketplaceListing, ...]:
+    ) -> tuple[tuple[MarketplaceListing, ...], str]:
+        """Parse a listings page. Strict per listing; tolerant per page.
+
+        Live pages mix item types, and some rows genuinely lack fields a contract
+        input requires (observed 2026-07-26: a live row with no ``min_float``). A
+        row that fails the strict parse is *excluded and counted* — never defaulted
+        — and the census travels in the success detail so a drop is visible
+        evidence, not silence. A page whose every row fails is a schema fault and
+        refuses outright: returning an empty success there would hide a breaking
+        API change behind "the market was quiet".
+        """
         document = response.json()
         rows = document.get("data") if isinstance(document, Mapping) else document
         if not isinstance(rows, list):
             raise TransportSchemaError("csfloat listings response is not a list")
-        return tuple(self._parse_listing(row, moment, response.payload_sha256) for row in rows)
+        listings: list[MarketplaceListing] = []
+        drop_reasons: list[str] = []
+        for row in rows:
+            try:
+                listings.append(self._parse_listing(row, moment, response.payload_sha256))
+            except TransportSchemaError as exc:
+                drop_reasons.append(str(exc))
+        if rows and not listings:
+            raise TransportSchemaError(
+                f"csfloat page had no parseable listing out of {len(rows)} rows; "
+                f"first fault: {drop_reasons[0]}"
+            )
+        detail = ""
+        if drop_reasons:
+            detail = (
+                f"{len(drop_reasons)}/{len(rows)} rows dropped by strict parse; "
+                f"first: {drop_reasons[0]}"
+            )
+        return tuple(listings), detail
 
     async def fetch_listing_by_id(
         self, listing_id: str, *, moment: datetime

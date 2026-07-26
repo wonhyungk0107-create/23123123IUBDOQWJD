@@ -138,6 +138,28 @@ know CSFloat's stated position on automated access, scraping, or acceptable API
 call volume. This is a gap that must be closed by a human reading the terms in a
 browser before any sustained polling, and certainly before execution.
 
+### Live response shape — VERIFIED 2026-07-26
+
+First authenticated read-only calls were made on 2026-07-26 with a real API key
+(`GET /api/v1/listings`, HTTP 200). Findings, each **VERIFIED** against the live
+response body:
+
+- Top level is `{cursor, data}` — cursor pagination exists.
+- A listing row carries `type` (`buy_now` **or** `auction`), `state` (`listed`),
+  `price` (integer cents), `seller`, `reference`, `auction_details`.
+- The `item` object carries `item_name` (base name, no wear suffix),
+  `market_hash_name`, `float_value`, `paint_index`, `def_index`, `paint_seed`,
+  `rarity` (int), `rarity_name`, `is_stattrak`, `is_souvenir`, `wear_name`,
+  `tradable`, inspect/screenshot fields.
+- The item does **not** carry `min_float`, `max_float` or `collection`. The
+  previous fixture assumed all three; that assumption was wrong and has been
+  corrected. Identity, collection membership and float caps are now resolved from
+  the pinned metadata registry (exact base-name + paint-index match, fail closed
+  on anything but exactly one candidate), and only `buy_now`/`listed` rows are
+  treated as purchasable — an auction's current price is a bid, not an ask.
+- A default listings page is auction-heavy: the first probe parsed 5 of 25 rows
+  as purchasable buy-now listings, with all 20 drops counted by reason.
+
 **Unresolved questions.**
 
 - What do CSFloat's terms of service actually say about automated access and
@@ -148,6 +170,12 @@ browser before any sustained polling, and certainly before execution.
   support documentation and be re-verified before each purchase.
 - Does `GET /api/v1/listings/<ID>` reliably distinguish "sold" from "delisted"?
   The revalidation gate depends on this.
+- What are the semantics of `item.tradable` and does a purchased item carry a
+  trade lock the buyer inherits? Trade-lock omission is a false-profitability
+  vector and this field is not yet interpreted.
+- Does `GET /listings` support server-side filters (rarity, type, price) that
+  would let the scanner request only `buy_now` rows? The documented parameter
+  list should be re-read before optimising the scan loop.
 
 ---
 

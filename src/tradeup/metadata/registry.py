@@ -107,6 +107,16 @@ class MetadataRegistry:
             key: tuple(sorted(value, key=lambda s: s.skin_id)) for key, value in index.items()
         }
 
+        # Index by canonical base name. Live venues state display names and paint
+        # indexes, not our synthetic skin ids, so adapters resolve identity here —
+        # the registry stays authoritative for collection and float caps.
+        by_name: dict[str, list[Skin]] = {}
+        for skin in skins:
+            by_name.setdefault(skin.market_hash_base, []).append(skin)
+        self._by_base_name: Mapping[str, tuple[Skin, ...]] = {
+            key: tuple(sorted(value, key=lambda s: s.skin_id)) for key, value in by_name.items()
+        }
+
     # -- lookups -------------------------------------------------------------
 
     def __len__(self) -> int:
@@ -136,6 +146,15 @@ class MetadataRegistry:
 
     def has_skin(self, skin_id: str) -> bool:
         return skin_id in self._skins
+
+    def skins_named(self, base_name: str) -> tuple[Skin, ...]:
+        """Skins whose canonical base name matches ``base_name`` exactly.
+
+        Exact string equality only — no normalisation, no fuzzy matching. A name
+        the registry does not know is an unknown item, and callers must fail
+        closed rather than guess.
+        """
+        return self._by_base_name.get(base_name, ())
 
     def collection(self, collection_id: str) -> Collection:
         try:
