@@ -106,7 +106,7 @@ class CSFloatAdapter(MarketAdapter):
     # -- parsing -------------------------------------------------------------
 
     def _parse_listing(
-        self, payload: Mapping[str, Any], observed_at: datetime
+        self, payload: Mapping[str, Any], observed_at: datetime, payload_hash: str
     ) -> MarketplaceListing:
         """Strict parse. Any missing required field fails closed.
 
@@ -186,20 +186,11 @@ class CSFloatAdapter(MarketAdapter):
             observed_at=observed_at,
             listing_status=ListingStatus.ACTIVE,
             tradable_status=TradableStatus.TRADABLE,
-            raw_payload_hash="",  # replaced by the caller with the response hash
+            raw_payload_hash=payload_hash,
             paint_index=(
                 int(item["paint_index"]) if isinstance(item.get("paint_index"), int) else None
             ),
             paint_seed=int(item["paint_seed"]) if isinstance(item.get("paint_seed"), int) else None,
-        )
-
-    @staticmethod
-    def _with_hash(listing: MarketplaceListing, payload_hash: str) -> MarketplaceListing:
-        return MarketplaceListing(
-            **{
-                **{f: getattr(listing, f) for f in listing.__dataclass_fields__},
-                "raw_payload_hash": payload_hash,
-            }
         )
 
     def _failure[T](
@@ -259,10 +250,7 @@ class CSFloatAdapter(MarketAdapter):
         rows = document.get("data") if isinstance(document, Mapping) else document
         if not isinstance(rows, list):
             raise TransportSchemaError("csfloat listings response is not a list")
-        return tuple(
-            self._with_hash(self._parse_listing(row, moment), response.payload_sha256)
-            for row in rows
-        )
+        return tuple(self._parse_listing(row, moment, response.payload_sha256) for row in rows)
 
     async def fetch_listing_by_id(
         self, listing_id: str, *, moment: datetime
@@ -279,7 +267,7 @@ class CSFloatAdapter(MarketAdapter):
                 f"{self._base_url}/listings/{listing_id}", headers=self._headers()
             )
             payload = response.json()
-            listing = self._with_hash(self._parse_listing(payload, moment), response.payload_sha256)
+            listing = self._parse_listing(payload, moment, response.payload_sha256)
         except TransportError as exc:
             return self._failure("fetch_listing_by_id", moment, exc)
         return CapabilityResult.succeeded(self.venue, "fetch_listing_by_id", moment, listing)

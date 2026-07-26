@@ -83,6 +83,8 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Repository root on sys.path so `tests.factories` is importable from every module.
+pythonpath = ["."]
 addopts = "-q --strict-markers --strict-config"
 markers = [
     "live: read-only network smoke tests; skipped unless credentials are present",

@@ -1,0 +1,170 @@
+{
+  "description": "Worked trade-up examples. Each case is computed by hand from the formulas in docs/rule-registry.md and pins the float and probability engines against arithmetic that does not depend on our own implementation.",
+  "cases": [
+    {
+      "id": "pure_collection_10_full_range",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "Ten inputs, one collection, all skins spanning [0,1]. Normalised float equals raw float, so the output float is the plain mean.",
+      "inputs": [
+        {"raw_float": "0.10", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.10", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.10", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.10", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.10", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.30", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.30", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.30", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.30", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.30", "min_float": "0.00", "max_float": "1.00"}
+      ],
+      "expected_average_normalized": "0.2",
+      "output": {"min_float": "0.00", "max_float": "1.00"},
+      "expected_output_float": "0.200000000000",
+      "expected_output_wear": "FIELD_TESTED",
+      "collections": {"col-a": 10},
+      "pools": {"col-a": ["y1", "y2", "y3", "y4"]},
+      "expected_probabilities": {"y1": "1/4", "y2": "1/4", "y3": "1/4", "y4": "1/4"}
+    },
+    {
+      "id": "restricted_input_range_normalisation",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "Inputs capped at [0.10, 0.70]. A raw 0.25 normalises to (0.25-0.10)/0.60 = 0.25, not 0.25 of the unit interval by accident.",
+      "inputs": [
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"},
+        {"raw_float": "0.25", "min_float": "0.10", "max_float": "0.70"}
+      ],
+      "expected_average_normalized": "1/4",
+      "output": {"min_float": "0.06", "max_float": "0.80"},
+      "expected_output_float": "0.245000000000",
+      "expected_output_wear": "FIELD_TESTED",
+      "collections": {"col-a": 10},
+      "pools": {"col-a": ["y1", "y2"]},
+      "expected_probabilities": {"y1": "1/2", "y2": "1/2"}
+    },
+    {
+      "id": "mixed_collection_7_3",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "Seven from a two-output collection, three from a three-output collection. P = n_c / (N * k_c): 7/(10*2)=0.35 each and 3/(10*3)=0.10 each.",
+      "inputs": [
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.20", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.40", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.40", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.40", "min_float": "0.00", "max_float": "1.00"}
+      ],
+      "expected_average_normalized": "13/50",
+      "output": {"min_float": "0.00", "max_float": "1.00"},
+      "expected_output_float": "0.260000000000",
+      "expected_output_wear": "FIELD_TESTED",
+      "collections": {"col-a": 7, "col-b": 3},
+      "pools": {"col-a": ["a1", "a2"], "col-b": ["b1", "b2", "b3"]},
+      "expected_probabilities": {
+        "a1": "7/20", "a2": "7/20", "b1": "1/10", "b2": "1/10", "b3": "1/10"
+      }
+    },
+    {
+      "id": "boundary_float_lands_in_higher_wear_band",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "Average normalised 0.07 against a [0,1] output gives exactly 0.07, which is Minimal Wear -- boundaries belong to the worse band.",
+      "inputs": [
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.07", "min_float": "0.00", "max_float": "1.00"}
+      ],
+      "expected_average_normalized": "7/100",
+      "output": {"min_float": "0.00", "max_float": "1.00"},
+      "expected_output_float": "0.070000000000",
+      "expected_output_wear": "MINIMAL_WEAR",
+      "collections": {"col-a": 10},
+      "pools": {"col-a": ["y1"]},
+      "expected_probabilities": {"y1": "1"}
+    },
+    {
+      "id": "capped_output_cannot_beat_field_tested",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "A perfect 0.00 input bundle against an output capped at [0.15, 0.38] still yields 0.15 -- Field-Tested. Ignoring output caps is how a calculator promises a Factory New that cannot exist.",
+      "inputs": [
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.00", "min_float": "0.00", "max_float": "1.00"}
+      ],
+      "expected_average_normalized": "0",
+      "output": {"min_float": "0.15", "max_float": "0.38"},
+      "expected_output_float": "0.150000000000",
+      "expected_output_wear": "FIELD_TESTED",
+      "collections": {"col-a": 10},
+      "pools": {"col-a": ["y1"]},
+      "expected_probabilities": {"y1": "1"}
+    },
+    {
+      "id": "covert_five_input_contract",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "Five-input Covert contract. N=5, k=4, so each outcome is 5/(5*4) = 1/4.",
+      "inputs": [
+        {"raw_float": "0.12", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.12", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.12", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.12", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.12", "min_float": "0.00", "max_float": "1.00"}
+      ],
+      "expected_average_normalized": "3/25",
+      "output": {"min_float": "0.00", "max_float": "0.80"},
+      "expected_output_float": "0.096000000000",
+      "expected_output_wear": "MINIMAL_WEAR",
+      "collections": {"col-a": 5},
+      "pools": {"col-a": ["k1", "k2", "k3", "k4"]},
+      "expected_probabilities": {"k1": "1/4", "k2": "1/4", "k3": "1/4", "k4": "1/4"}
+    },
+    {
+      "id": "shared_output_across_collections_aggregates",
+      "rule_version": "2026-05-souvenir-covert",
+      "note": "Both collections can produce the same skin. Per-collection probabilities stay separate for the operator card, but aggregate to 1 for valuation.",
+      "inputs": [
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"},
+        {"raw_float": "0.50", "min_float": "0.00", "max_float": "1.00"}
+      ],
+      "expected_average_normalized": "1/2",
+      "output": {"min_float": "0.00", "max_float": "1.00"},
+      "expected_output_float": "0.500000000000",
+      "expected_output_wear": "BATTLE_SCARRED",
+      "collections": {"col-a": 5, "col-b": 5},
+      "pools": {"col-a": ["shared"], "col-b": ["shared"]},
+      "expected_probabilities": {"shared": "1"}
+    }
+  ]
+}
