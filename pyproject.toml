@@ -85,7 +85,10 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 # Repository root on sys.path so `tests.factories` is importable from every module.
 pythonpath = ["."]
-addopts = "-q --strict-markers --strict-config"
+# `not live` by default: the mandatory suite must never touch the public internet,
+# even on a machine that happens to have credentials configured. `make live-smoke`
+# opts in explicitly with `-m live`.
+addopts = "-q --strict-markers --strict-config -m 'not live'"
 markers = [
     "live: read-only network smoke tests; skipped unless credentials are present",
 ]

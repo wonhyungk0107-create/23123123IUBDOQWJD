@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# No secrets are used by any job. The mandatory suite must never touch the network,
+# so a CI run that suddenly needs a credential is a bug in the tests.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TRADEUP_LIVE_EXECUTION_ENABLED: "false"
+  TRADEUP_MAX_DAILY_SPEND_MINOR: "0"
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Bootstrap
+        run: uv sync --frozen --extra dev
+
+      - name: Lint
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+
+      - name: Typecheck
+        run: uv run mypy
+
+      - name: Migrations apply and roll back
+        env:
+          TRADEUP_DATABASE_URL: sqlite+pysqlite:///./ci.db
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+
+      - name: Tests and coverage floors
+        run: |
+          uv run pytest --cov --cov-report=term-missing --cov-report=json
+          uv run python tools/check_coverage.py
+
+      - name: Offline demo
+        run: uv run tradeup demo --quiet
+
+      - name: Demo is reproducible
+        shell: bash
+        run: |
+          uv run tradeup demo --quiet --output artifacts/run-a
+          uv run tradeup demo --quiet --output artifacts/run-b
+          # Runtime is a measurement, not a result; everything else must match.
+          sed -E 's/\| runtime_seconds \|.*/| runtime_seconds | <measured> |/' \
+            artifacts/run-a/*.md > /tmp/a.md
+          sed -E 's/\| runtime_seconds \|.*/| runtime_seconds | <measured> |/' \
+            artifacts/run-b/*.md > /tmp/b.md
+          diff /tmp/a.md /tmp/b.md
+
+      - name: No concealed incompleteness
+        shell: bash
+        run: uv run python tools/check_no_placeholders.py
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ matrix.os }}
+          path: artifacts/
+          if-no-files-found: ignore
+
+  docker:
+    name: docker image builds and runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t tradeup:ci .
+      - name: Demo inside the image
+        run: docker run --rm tradeup:ci tradeup demo --quiet
+      - name: Doctor inside the image
+        run: docker run --rm tradeup:ci tradeup doctor

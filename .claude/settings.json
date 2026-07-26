@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git clean -f*)",
+      "Bash(git clean -x*)",
+      "Bash(git branch -D*)",
+      "Bash(git rebase*)",
+      "Bash(rm -rf *)",
+      "Bash(Remove-Item -Recurse -Force*)"
+    ],
+    "allow": [
+      "Bash(uv run pytest*)",
+      "Bash(uv run ruff*)",
+      "Bash(uv run mypy*)",
+      "Bash(uv run tradeup*)",
+      "Bash(uv run alembic*)",
+      "Bash(uv run python tools/*)",
+      "Bash(uv sync*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python tools/format_hook.py",
+            "timeout": 60,
+            "statusMessage": "ruff"
+          }
+        ]
+      }
+    ]
+  }
+}

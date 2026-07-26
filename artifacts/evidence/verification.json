@@ -1,0 +1,111 @@
+{
+  "all_gates_passed": true,
+  "commands": {
+    "coverage_floors": {
+      "command": "uv run python tools/check_coverage.py",
+      "exit_code": 0,
+      "passed": true
+    },
+    "demo": {
+      "command": "uv run tradeup demo --quiet",
+      "exit_code": 0,
+      "passed": true
+    },
+    "format_check": {
+      "command": "uv run ruff format --check .",
+      "exit_code": 0,
+      "passed": true
+    },
+    "lint": {
+      "command": "uv run ruff check .",
+      "exit_code": 0,
+      "passed": true
+    },
+    "migrate_down": {
+      "command": "uv run alembic downgrade base",
+      "exit_code": 0,
+      "passed": true
+    },
+    "migrate_up": {
+      "command": "uv run alembic upgrade head",
+      "exit_code": 0,
+      "passed": true
+    },
+    "no_placeholders": {
+      "command": "uv run python tools/check_no_placeholders.py",
+      "exit_code": 0,
+      "passed": true
+    },
+    "tests": {
+      "command": "uv run pytest --cov --cov-report=json",
+      "exit_code": 0,
+      "passed": true
+    },
+    "typecheck": {
+      "command": "uv run mypy",
+      "exit_code": 0,
+      "passed": true
+    }
+  },
+  "coverage": {
+    "critical_module_floor_percent": 90.0,
+    "overall_floor_percent": 80.0,
+    "overall_percent": 85.3,
+    "per_critical_module": {
+      "src/tradeup/domain/fees.py": "90.7%",
+      "src/tradeup/domain/items.py": "98.6%",
+      "src/tradeup/domain/mathematics.py": "96.6%",
+      "src/tradeup/domain/money.py": "99.4%",
+      "src/tradeup/domain/rules.py": "95.7%",
+      "src/tradeup/execution/policy.py": "93.0%",
+      "src/tradeup/optimizer/bundle.py": "96.0%",
+      "src/tradeup/optimizer/pareto.py": "94.9%",
+      "src/tradeup/valuation/capital.py": "100.0%",
+      "src/tradeup/valuation/exit_prices.py": "92.6%",
+      "src/tradeup/valuation/expected_value.py": "98.0%",
+      "src/tradeup/valuation/partial_fill.py": "96.0%"
+    },
+    "report": "coverage.json"
+  },
+  "economic_evidence": {
+    "fills": 0,
+    "ledger_events": 0,
+    "note": "Zero across the board. The system has never contacted a live marketplace with credentials, placed an order, performed a trade-up, or settled proceeds. The simulated opportunity count comes from synthetic prices and is not market evidence.",
+    "orders_placed": 0,
+    "real_market_qualified_opportunities": 0,
+    "sales": 0,
+    "settled_fee_net_profit_usd": "0.00",
+    "settlements": 0,
+    "simulated_opportunities": 1,
+    "trade_ups_completed": 0
+  },
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.13"
+  },
+  "generated_at": "2026-07-26T04:20:41.614881+00:00",
+  "generated_by": "tools/write_verification.py",
+  "live_checks": {
+    "performed": false,
+    "reason": "No marketplace credentials are configured in this environment. `make live-smoke` skips cleanly; no live read has been performed against CSFloat, DMarket or SkinSnipe."
+  },
+  "metadata": {
+    "projection_entry_count": 1455,
+    "projection_sha256": "409522b7dab15838b115b173a2e353229d3e82f19c3a677a85a8c6868ae088d5",
+    "upstream_commit": "342d49698a77ca5d2da69c4ecd236358c866a364",
+    "upstream_repo": "ByMykel/CSGO-API",
+    "upstream_sha256": "7aeb9582c5f3308be78c78d2fd3681e3c469c67c0aeeeb7a9e54adb5c3be32d7"
+  },
+  "offline_demo": {
+    "approved_candidates": 1,
+    "artifacts_dir": "artifacts/evidence/",
+    "data_nature": "SYNTHETIC listings and prices over REAL pinned metadata",
+    "rejected_candidates": 57,
+    "rejection_census": "ASSET_ALREADY_RESERVED=12;BELOW_DISCOVERY_ROI=19;BELOW_MIN_ABSOLUTE_PROFIT=2;LISTING_DISAPPEARED=13;LISTING_PRICE_CHANGED=12;QUOTE_TOO_OLD=28"
+  },
+  "tests": {
+    "count": 446,
+    "hypothesis_mode": "derandomize",
+    "network_required": false
+  }
+}

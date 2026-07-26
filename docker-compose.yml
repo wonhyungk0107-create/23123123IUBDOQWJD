@@ -1,0 +1,53 @@
+# Local stack for the shadow scanner.
+#
+# SQLite is the default and needs no services at all -- `docker compose run scanner`
+# works on its own. The postgres profile exists so the same repository layer can be
+# exercised against PostgreSQL before anything depends on that being true.
+
+services:
+  scanner:
+    build: .
+    image: tradeup:local
+    environment:
+      # Both of these are already the defaults in the settings model. Repeating them
+      # here means a compose file copied into another environment still cannot spend.
+      TRADEUP_LIVE_EXECUTION_ENABLED: "false"
+      TRADEUP_MAX_DAILY_SPEND_MINOR: "0"
+      TRADEUP_DATABASE_URL: "sqlite+pysqlite:////app/artifacts/tradeup.db"
+    volumes:
+      - ./artifacts:/app/artifacts
+    # No ports published. Nothing in this system listens.
+    command: ["tradeup", "demo", "--quiet"]
+
+  scanner-postgres:
+    profiles: ["postgres"]
+    build: .
+    image: tradeup:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TRADEUP_LIVE_EXECUTION_ENABLED: "false"
+      TRADEUP_MAX_DAILY_SPEND_MINOR: "0"
+      TRADEUP_DATABASE_URL: "postgresql+psycopg://tradeup:tradeup@postgres:5432/tradeup"
+    volumes:
+      - ./artifacts:/app/artifacts
+    command: ["tradeup", "doctor"]
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tradeup
+      POSTGRES_PASSWORD: tradeup
+      POSTGRES_DB: tradeup
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradeup -d tradeup"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
