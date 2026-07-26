@@ -60,21 +60,46 @@ class BalanceTypeMismatchError(MoneyError):
 class Currency(enum.StrEnum):
     """Supported settlement currencies.
 
-    ``exponent`` is the number of minor units per major unit, so conversion to and
-    from human-readable amounts never guesses.
+    ``exponent`` is the number of decimal places between the major unit and the
+    minor unit actually stored, so conversion to and from human-readable amounts
+    never guesses. For the crypto currencies the minor unit is the chain's own
+    indivisible unit: satoshi for BTC, wei for ETH, micro-USDT for USDT. Integer
+    minor units at the native resolution mean no crypto amount is ever rounded
+    below what the chain itself can represent.
     """
 
     USD = "USD"
     EUR = "EUR"
     GBP = "GBP"
+    BTC = "BTC"
+    ETH = "ETH"
+    USDT = "USDT"
 
     @property
     def exponent(self) -> int:
-        return 2
+        return _CURRENCY_EXPONENTS[self]
 
     @property
     def scale(self) -> int:
         return int(10**self.exponent)
+
+    @property
+    def is_crypto(self) -> bool:
+        return self in _CRYPTO_CURRENCIES
+
+
+_CURRENCY_EXPONENTS: Final[dict[Currency, int]] = {
+    Currency.USD: 2,
+    Currency.EUR: 2,
+    Currency.GBP: 2,
+    Currency.BTC: 8,
+    Currency.ETH: 18,
+    Currency.USDT: 6,
+}
+
+_CRYPTO_CURRENCIES: Final[frozenset[Currency]] = frozenset(
+    {Currency.BTC, Currency.ETH, Currency.USDT}
+)
 
 
 class BalanceType(enum.StrEnum):

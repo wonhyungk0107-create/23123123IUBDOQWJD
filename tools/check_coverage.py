@@ -23,6 +23,7 @@ from pathlib import Path
 CRITICAL_MODULES = (
     "src/tradeup/domain/mathematics.py",
     "src/tradeup/domain/money.py",
+    "src/tradeup/domain/conversion.py",
     "src/tradeup/domain/items.py",
     "src/tradeup/domain/rules.py",
     "src/tradeup/domain/fees.py",
@@ -32,6 +33,7 @@ CRITICAL_MODULES = (
     "src/tradeup/valuation/exit_prices.py",
     "src/tradeup/valuation/expected_value.py",
     "src/tradeup/valuation/partial_fill.py",
+    "src/tradeup/valuation/settlement.py",
     "src/tradeup/execution/policy.py",
 )
 

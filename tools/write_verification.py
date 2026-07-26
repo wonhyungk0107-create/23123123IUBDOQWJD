@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -40,6 +41,24 @@ COMMANDS: tuple[tuple[str, list[str]], ...] = (
 )
 
 
+def _resolve(command: list[str]) -> list[str]:
+    """Translate ``uv run X …`` for environments where ``uv`` is not on PATH.
+
+    The gate still runs the real tool from this interpreter's environment; only the
+    launcher differs, and the recorded command string is the one actually executed.
+    """
+    if shutil.which("uv") is not None or command[:2] != ["uv", "run"]:
+        return command
+    head, *rest = command[2:]
+    if head == "python":
+        return [sys.executable, *rest]
+    scripts_dir = str(Path(sys.executable).parent)
+    resolved = shutil.which(head, path=scripts_dir)
+    if resolved is not None:
+        return [resolved, *rest]
+    return [sys.executable, "-m", head, *rest]
+
+
 def _run(command: list[str]) -> tuple[int, str]:
     result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     return result.returncode, (result.stdout or "") + (result.stderr or "")
@@ -55,10 +74,11 @@ def main() -> int:
     outputs: dict[str, str] = {}
 
     for name, command in COMMANDS:
-        code, output = _run(command)
+        actual = _resolve(command)
+        code, output = _run(actual)
         outputs[name] = output
         results[name] = {
-            "command": " ".join(command),
+            "command": " ".join(actual),
             "exit_code": code,
             "passed": code == 0,
         }

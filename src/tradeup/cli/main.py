@@ -20,6 +20,7 @@ from tradeup.clock import SystemClock
 from tradeup.config import Settings, load_settings
 from tradeup.demo.runner import default_metadata_path, run_demo
 from tradeup.domain.items import Rarity
+from tradeup.domain.money import Currency
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
 from tradeup.metadata.bymykel import load_pinned_snapshot
 from tradeup.metadata.registry import IssueSeverity
@@ -287,7 +288,13 @@ def demo(
     quiet: Annotated[bool, typer.Option(help="Only print the summary.")] = False,
 ) -> None:
     """Deterministic offline end-to-end run. No network, no orders."""
-    settings = _settings()
+    # The demo always exercises the crypto settlement rail on synthetic values,
+    # regardless of the environment, so the offline slice covers the whole money
+    # path and stays byte-comparable between runs.
+    settings = load_settings(
+        crypto_settlement_enabled=True,
+        settlement_currency=Currency.BTC,
+    )
     _echo_boundary(settings)
     typer.echo("SYNTHETIC demo data over REAL pinned metadata. Not market evidence.\n")
 

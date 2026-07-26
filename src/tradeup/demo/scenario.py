@@ -29,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from tradeup.adapters.fixture import FixtureMarketAdapter, FixtureScenario
+from tradeup.domain.conversion import ConversionQuote
 from tradeup.domain.fees import FeeOperation, FeeRule, FeeSchedule
 from tradeup.domain.items import QualityType, Rarity, Skin, WearCondition
 from tradeup.domain.listings import (
@@ -42,15 +43,19 @@ from tradeup.domain.valuation import PriceObservation, ValuationSource
 from tradeup.metadata.registry import MetadataRegistry
 
 __all__ = [
+    "DEMO_CRYPTO_RAIL",
     "DEMO_FEE_SCHEDULE_ID",
     "DEMO_VENUE_A",
     "DEMO_VENUE_B",
     "DemoScenario",
+    "build_demo_conversion_quote",
     "build_demo_scenario",
 ]
 
 DEMO_VENUE_A = "demo-market-a"
 DEMO_VENUE_B = "demo-market-b"
+#: Synthetic crypto settlement rail: the fictional network the demo's BTC moves over.
+DEMO_CRYPTO_RAIL = "demo-crypto-rail"
 DEMO_FEE_SCHEDULE_ID = "demo-synthetic-v1"
 
 _SYNTHETIC_SOURCE = (
@@ -66,6 +71,7 @@ class DemoScenario:
     listings: tuple[MarketplaceListing, ...]
     price_observations: tuple[PriceObservation, ...]
     fee_schedule: FeeSchedule
+    conversion_quote: ConversionQuote
     adapters: tuple[FixtureMarketAdapter, ...]
     collections: tuple[str, ...]
     disappearing: frozenset[str]
@@ -108,8 +114,40 @@ def build_demo_fee_schedule() -> FeeSchedule:
             _fee_rule(f"{venue}:deposit", venue, FeeOperation.DEPOSIT, "0.00"),
             _fee_rule(f"{venue}:sale", venue, FeeOperation.SALE, sale),
             _fee_rule(f"{venue}:withdrawal", venue, FeeOperation.WITHDRAWAL, withdrawal, 25),
+            _fee_rule(f"{venue}:fx", venue, FeeOperation.FX_CONVERSION, "0.005"),
         ]
+    # A flat 20,000-satoshi on-chain transfer fee for the synthetic BTC rail.
+    rules.append(
+        FeeRule(
+            rule_id=f"{DEMO_CRYPTO_RAIL}:network",
+            venue=DEMO_CRYPTO_RAIL,
+            operation=FeeOperation.NETWORK_TRANSFER,
+            balance_type=BalanceType.CASH_WITHDRAWABLE,
+            currency=Currency.BTC,
+            percentage=Decimal("0"),
+            fixed_minor=20_000,
+            effective_from=datetime(2020, 1, 1, tzinfo=UTC),
+            effective_until=None,
+            source=_SYNTHETIC_SOURCE,
+            last_verified=None,
+        )
+    )
     return FeeSchedule(rules)
+
+
+def build_demo_conversion_quote(now: datetime) -> ConversionQuote:
+    """A fixed, clearly-synthetic BTC/USD quote, fresh relative to the demo instant."""
+    return ConversionQuote(
+        base=Currency.BTC,
+        quote=Currency.USD,
+        rate=Decimal("100000"),
+        observed_at=now - timedelta(seconds=30),
+        source=(
+            "SYNTHETIC demo rate -- invented for the offline demonstration. "
+            "Not a market observation and must never be used for a live decision."
+        ),
+        venue=DEMO_CRYPTO_RAIL,
+    )
 
 
 def _eligible_collections(registry: MetadataRegistry, *, minimum_inputs: int = 3) -> list[str]:
@@ -354,6 +392,7 @@ def build_demo_scenario(
         listings=tuple(listings),
         price_observations=tuple(observations),
         fee_schedule=build_demo_fee_schedule(),
+        conversion_quote=build_demo_conversion_quote(now),
         adapters=(
             FixtureMarketAdapter(DEMO_VENUE_A, scenario_a),
             FixtureMarketAdapter(DEMO_VENUE_B, scenario_b),
@@ -369,6 +408,9 @@ def build_demo_scenario(
             f"Unreliable collection: {unreliable_id} (one vanishing listing and one "
             "that changes price on revalidation).",
             f"Stale collection: {stale_id} (economics fine, every quote 3 hours old).",
+            "Crypto settlement rail is synthetic: a fixed BTC/USD rate and invented "
+            "deposit/withdrawal/network fees, so the settlement charge is exercised "
+            "deterministically.",
             "Nothing here is evidence about the real market.",
         ),
     )
@@ -384,6 +426,10 @@ def scenario_summary(scenario: DemoScenario) -> dict[str, str]:
         "price_changed_listings": ",".join(sorted(scenario.price_changes)) or "none",
         "stale_listings": ",".join(scenario.stale_listing_ids) or "none",
         "fee_schedule": DEMO_FEE_SCHEDULE_ID,
+        "conversion_quote": (
+            f"{scenario.conversion_quote.pair}@{scenario.conversion_quote.rate} "
+            f"via {scenario.conversion_quote.venue} (SYNTHETIC)"
+        ),
         "data_nature": "SYNTHETIC listings/prices over REAL pinned metadata",
     }
 

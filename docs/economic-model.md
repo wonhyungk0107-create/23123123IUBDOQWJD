@@ -3,20 +3,58 @@
 ## The objective function
 
 Settled, attributable, fee-net, cash-withdrawable profit. Not EV, not a passing
-candidate, not an unsold output, not Steam Wallet value.
+candidate, not an unsold output, not Steam Wallet value. When the crypto settlement
+rail is enabled, "withdrawable" means withdrawable to the operator's own wallet in
+the configured settlement currency, and the round trip that gets it there is a
+modelled cost like any other.
 
 ## Cost
 
 ```
 acquisition_cost = Σ (price + buyer_fee + deposit_fee) + fx_cost + payment_surcharge
 all_in_cost      = acquisition_cost + operational_cost
+                                    + settlement_cost
                                     + capital_carry_cost
                                     + partial_fill_reserve
 ```
 
 `acquisition_cost` is cash that leaves the wallet. `all_in_cost` adds charges that
-are real but paid to no one: the opportunity cost of committed capital, operations,
-and the expected cost of failing to complete the bundle.
+are real but paid to no one at purchase time: the opportunity cost of committed
+capital, operations, the settlement-rail share, and the expected cost of failing to
+complete the bundle.
+
+## The crypto settlement rail
+
+Venues in this space commonly take deposits and pay withdrawals in crypto (BTC and
+similar), and the operator's capital may live in a crypto wallet rather than a bank
+account. That rail is not free, and pretending it is would overstate every
+contract's realisable profit. `valuation/settlement.py` prices one capital round
+trip explicitly:
+
+```
+funding:    crypto_sent   = convert_up(capital + deposit_fee + fx_spread)
+            outlay        = crypto_sent + network_fee_in
+withdrawal: crypto_out    = convert_down(capital − withdrawal_fee − fx_spread)
+                            − network_fee_out
+            after_haircut = crypto_out · (1 − volatility_haircut)
+drag        = fiat_up(outlay) − fiat_down(after_haircut)
+```
+
+Every conversion goes through an explicit `ConversionQuote` (rate + venue + source +
+timestamp, exact `Fraction` arithmetic, one rounding step in the pessimistic
+direction) and fails closed when the quote is stale, the pair is wrong, or any fee
+is unknown. Each contract is then charged
+
+```
+settlement_cost = acquisition_cost · (drag / capital) / amortization_contracts
+```
+
+so a contract pays for the capital it actually uses. Two of these numbers are
+**stated priors pending calibration** and every surface that shows the charge says
+so: the volatility haircut (default 2%) and the amortisation horizon (default 10
+contracts per round trip). The rail is off by default
+(`crypto_settlement_enabled=false`); enabling it requires a crypto
+`settlement_currency`, and the settings model refuses inconsistent combinations.
 
 ## Value
 

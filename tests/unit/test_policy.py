@@ -42,6 +42,7 @@ def evaluation(**overrides: object) -> CandidateEvaluation:
         "payment_surcharge": usd(0),
         "acquisition_cost": usd(1020),
         "operational_cost": usd(0),
+        "settlement_cost": usd(0),
         "capital_carry_cost": usd(5),
         "partial_fill_reserve": usd(25),
         "all_in_cost": usd(1050),

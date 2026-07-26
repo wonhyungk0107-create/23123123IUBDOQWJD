@@ -81,11 +81,17 @@ class ExpectedValueEngine:
         settings: Settings,
         capital_model: CapitalModel,
         partial_fill_model: PartialFillModel,
+        settlement_charge_rate: Fraction | None = None,
     ) -> None:
         self._settings = settings
         self._capital = capital_model
         self._partial_fill = partial_fill_model
         self._currency = settings.base_currency
+        if settlement_charge_rate is not None and settlement_charge_rate < 0:
+            raise ValueError(
+                f"a settlement charge rate cannot be negative, got {settlement_charge_rate}"
+            )
+        self._settlement_rate = settlement_charge_rate or Fraction(0)
 
     # -- components ----------------------------------------------------------
 
@@ -159,10 +165,13 @@ class ExpectedValueEngine:
         timeline = self._timeline(candidate, moment, outcomes)
 
         operational = self._settings.operational_cost_per_contract
+        # The settlement rail charges each contract its share of the capital round
+        # trip, proportional to the capital the contract actually uses.
+        settlement = acquisition.scaled_up(self._settlement_rate)
         carry = self._capital.carry_cost(acquisition, timeline.total_days)
         reserve = assessment.expected_loss
 
-        all_in = acquisition + operational + carry + reserve
+        all_in = acquisition + operational + settlement + carry + reserve
 
         # Expected value, and the confidence-discounted lower bound.
         expected_output_value = probability_weighted(
@@ -204,6 +213,7 @@ class ExpectedValueEngine:
             payment_surcharge=costs.payment_surcharge,
             acquisition_cost=acquisition,
             operational_cost=operational,
+            settlement_cost=settlement,
             capital_carry_cost=carry,
             partial_fill_reserve=reserve,
             all_in_cost=all_in,

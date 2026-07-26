@@ -52,6 +52,9 @@ class FeeOperation(enum.StrEnum):
     FX_CONVERSION = "FX_CONVERSION"
     """Spread or margin charged on a currency conversion."""
 
+    NETWORK_TRANSFER = "NETWORK_TRANSFER"
+    """On-chain cost of moving a crypto amount to or from a venue."""
+
     PAYMENT_SURCHARGE = "PAYMENT_SURCHARGE"
     """Processor or regional tax surcharge, only ever from an explicit quote."""
 

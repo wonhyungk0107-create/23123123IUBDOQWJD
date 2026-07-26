@@ -12,11 +12,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from fractions import Fraction
 from pathlib import Path
 
 from tradeup.config import Settings
 from tradeup.demo.scenario import (
+    DEMO_CRYPTO_RAIL,
     DEMO_FEE_SCHEDULE_ID,
+    DEMO_VENUE_A,
     DemoScenario,
     build_demo_scenario,
     scenario_summary,
@@ -50,6 +53,7 @@ from tradeup.valuation.capital import CapitalModel
 from tradeup.valuation.exit_prices import ExitPriceResolver
 from tradeup.valuation.expected_value import ExpectedValueEngine
 from tradeup.valuation.partial_fill import PartialFillModel
+from tradeup.valuation.settlement import CryptoSettlementPlanner, SettlementPlan
 
 __all__ = ["DemoResult", "default_metadata_path", "run_demo"]
 
@@ -79,6 +83,7 @@ class DemoResult:
     settled_cash_minor: int
     ledger_event_count: int
     console_output: str
+    settlement_plan: SettlementPlan | None
 
     @property
     def approved_count(self) -> int:
@@ -112,7 +117,26 @@ def run_demo(
     # 3. Synthetic market over that real metadata.
     scenario = build_demo_scenario(registry, now=now)
 
-    # 4. Wire the economics.
+    # 4. Wire the economics. When the crypto rail is enabled, price one synthetic
+    # capital round trip and charge each contract its proportional share.
+    settlement_plan: SettlementPlan | None = None
+    settlement_rate: Fraction | None = None
+    if settings.crypto_settlement_enabled:
+        planner = CryptoSettlementPlanner(
+            settings=settings,
+            fee_schedule=scenario.fee_schedule,
+            funding_venue=DEMO_VENUE_A,
+            network_venue=DEMO_CRYPTO_RAIL,
+        )
+        settlement_plan = planner.plan(
+            capital=settings.max_contract_cost,
+            quote=scenario.conversion_quote,
+            moment=now,
+        )
+        settlement_rate = settlement_plan.per_contract_charge_rate(
+            settings.settlement_amortization_contracts
+        )
+
     capital_model = CapitalModel(annual_rate=settings.annual_capital_cost_rate)
     exit_resolver = ExitPriceResolver(
         fee_schedule=scenario.fee_schedule,
@@ -121,7 +145,10 @@ def run_demo(
     )
     partial_fill = PartialFillModel(base_currency=settings.base_currency)
     ev_engine = ExpectedValueEngine(
-        settings=settings, capital_model=capital_model, partial_fill_model=partial_fill
+        settings=settings,
+        capital_model=capital_model,
+        partial_fill_model=partial_fill,
+        settlement_charge_rate=settlement_rate,
     )
     reservations = ReservationRegistry()
     pipeline = ScanPipeline(
@@ -149,6 +176,16 @@ def run_demo(
     )
 
     # 6. Operator cards for whatever survived.
+    card_warnings = [
+        "SYNTHETIC DEMO DATA. Listings and prices are invented; only the "
+        "item metadata is real. This card must never be acted upon.",
+    ]
+    if settlement_plan is not None:
+        card_warnings.append(
+            "SYNTHETIC crypto settlement rail. The BTC/USD rate and the "
+            "deposit/withdrawal/network fees behind the settlement-rail charge are "
+            "invented demo values, not market observations."
+        )
     cards: list[OperatorCard] = []
     for outcome in report.ranked():
         assessment = partial_fill.assess(outcome.candidate.inputs, now)
@@ -159,10 +196,7 @@ def run_demo(
                 assessment,
                 metadata_revision=registry.revision,
                 generated_at=now,
-                extra_warnings=(
-                    "SYNTHETIC DEMO DATA. Listings and prices are invented; only the "
-                    "item metadata is real. This card must never be acted upon.",
-                ),
+                extra_warnings=tuple(card_warnings),
             )
         )
 
@@ -224,6 +258,28 @@ def run_demo(
             "settings": dict(report.settings_summary),
             "statistics": report.statistics.summary(),
             "adapters": [dict(c) for c in report.adapter_capabilities],
+            "crypto_settlement": (
+                {
+                    "enabled": True,
+                    "data_nature": "SYNTHETIC rate and fees; priors pending calibration",
+                    "pair": scenario.conversion_quote.pair,
+                    "rate": str(scenario.conversion_quote.rate),
+                    "capital_basis_minor": settings.max_contract_cost.minor_units,
+                    "funding_crypto_outlay_minor": (
+                        settlement_plan.funding.total_crypto_outlay.minor_units
+                    ),
+                    "crypto_currency": settlement_plan.funding.crypto_sent.currency.value,
+                    "withdrawal_crypto_after_haircut_minor": (
+                        settlement_plan.withdrawal.crypto_after_haircut.minor_units
+                    ),
+                    "round_trip_drag_minor": settlement_plan.round_trip_drag.minor_units,
+                    "amortization_contracts": settings.settlement_amortization_contracts,
+                    "per_contract_charge_rate": str(settlement_rate),
+                    "volatility_haircut": str(settings.crypto_volatility_haircut),
+                }
+                if settlement_plan is not None and settlement_rate is not None
+                else {"enabled": False}
+            ),
             "approved": [card.to_dict() for card in cards],
             "rejections": [
                 {
@@ -264,4 +320,5 @@ def run_demo(
         settled_cash_minor=settled.minor_units,
         ledger_event_count=ledger_count,
         console_output=console,
+        settlement_plan=settlement_plan,
     )

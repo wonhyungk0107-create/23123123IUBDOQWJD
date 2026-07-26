@@ -238,6 +238,12 @@ class TestLedger:
         with pytest.raises(LedgerSignError, match="inflow but amount is negative"):
             event(LedgerEventType.SALE, -1000)
 
+    def test_network_fees_are_outflows(self) -> None:
+        """The on-chain cost of a crypto transfer is spent money, never income."""
+        with pytest.raises(LedgerSignError, match="outflow but amount is positive"):
+            event(LedgerEventType.NETWORK_FEE, 1)
+        assert event(LedgerEventType.NETWORK_FEE, -20_000).amount.is_negative
+
     def test_custody_moves_must_carry_zero(self) -> None:
         """A transfer moves an item, not money."""
         with pytest.raises(LedgerSignError, match="must carry a zero amount"):

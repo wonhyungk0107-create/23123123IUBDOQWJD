@@ -222,3 +222,31 @@ movement — the exact statistic a shadow run exists to measure.
 
 **Evidence.** Code, plus a policy test asserting a price change does *not* report as a
 disappearance.
+
+---
+
+## D-017 — Crypto settlement is a priced rail, not a new balance type
+
+**Uncertainty removed.** How to make "cash-withdrawable" mean anything when the
+operator's capital enters and exits venues as BTC. Options were a new balance type,
+a parallel crypto ledger, or pricing the rail. A balance type would have forced
+every existing gate to reason about crypto; pricing the rail keeps the optimizer and
+gates in the fiat base currency and charges each contract its share of the round
+trip (deposit/withdrawal fees, FX spread, on-chain network fees both ways, and a
+volatility haircut) through `settlement_cost` in `all_in_cost`.
+
+**Enables.** BTC/ETH/USDT amounts as exact integer minor units at chain-native
+resolution (satoshi/wei/micro-USDT); explicit, provenance-carrying `ConversionQuote`
+conversion with pessimistic rounding; a per-contract settlement charge proportional
+to the capital a contract actually uses, so a $12 demo contract is not billed a
+$500 block's drag.
+
+**Would make it unnecessary.** An operator who funds and withdraws exclusively in
+the fiat base currency — in which case the rail stays disabled and the charge is an
+explicit zero.
+
+**Evidence.** Code, hand-computed golden round trip in `tests/unit/test_settlement.py`,
+and the demo artifact's `crypto_settlement` section (synthetic rate and fees,
+labelled as such). The volatility haircut and amortisation horizon are stated
+priors; no real venue's crypto fee schedule has been sourced yet, and the source
+matrix records exactly that.

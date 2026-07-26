@@ -59,6 +59,7 @@ class TestEvaluation:
         assert evaluation.all_in_cost == (
             evaluation.acquisition_cost
             + evaluation.operational_cost
+            + evaluation.settlement_cost
             + evaluation.capital_carry_cost
             + evaluation.partial_fill_reserve
         )
@@ -154,6 +155,36 @@ class TestEvaluation:
         assert forward.ev_net == reverse.ev_net
         assert forward.acquisition_cost == reverse.acquisition_cost
         assert forward.roi_net == reverse.roi_net
+
+
+class TestSettlementCharge:
+    def _engine_with_settlement(self, rate: Fraction) -> ExpectedValueEngine:
+        settings = Settings(database_url="sqlite+pysqlite:///:memory:")  # type: ignore[call-arg]
+        return ExpectedValueEngine(
+            settings=settings,
+            capital_model=CapitalModel(annual_rate=settings.annual_capital_cost_rate),
+            partial_fill_model=PartialFillModel(base_currency=Currency.USD),
+            settlement_charge_rate=rate,
+        )
+
+    def test_default_settlement_cost_is_an_explicit_zero(self) -> None:
+        evaluation = engine().evaluate(make_candidate(), moment=NOW, fee_schedule_id="t")
+        assert evaluation.settlement_cost == usd(0)
+
+    def test_settlement_charge_is_proportional_to_acquisition_and_rounds_up(self) -> None:
+        candidate = make_candidate()
+        base = engine().evaluate(candidate, moment=NOW, fee_schedule_id="t")
+        charged = self._engine_with_settlement(Fraction(1, 100)).evaluate(
+            candidate, moment=NOW, fee_schedule_id="t"
+        )
+        expected = base.acquisition_cost.scaled_up(Fraction(1, 100))
+        assert charged.settlement_cost == expected
+        assert charged.all_in_cost == base.all_in_cost + expected
+        assert charged.ev_net == base.ev_net - expected
+
+    def test_negative_settlement_rate_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="cannot be negative"):
+            self._engine_with_settlement(Fraction(-1, 100))
 
 
 class TestInputGuards:

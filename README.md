@@ -15,6 +15,13 @@ composition's float budget, prices the result net of every modelled fee, and emi
 an operator action card only when the candidate clears configurable profitability
 and risk gates. The Steam-side trade-up is performed manually by a human operator.
 
+Capital can be funded and settled through a crypto rail (BTC/ETH/USDT at
+chain-native minor units): when `TRADEUP_CRYPTO_SETTLEMENT_ENABLED=true`, the
+deposit → trade → withdraw round trip is priced explicitly (venue fees, FX spread,
+network fees, volatility haircut) and each contract is charged its share, so EV
+means profit that actually reaches the operator's wallet. See
+[`docs/economic-model.md`](docs/economic-model.md).
+
 ## Hard boundaries
 
 - **No Steam automation.** No Steam Community Market orders, no automated trade

@@ -145,6 +145,7 @@ class OperatorCard:
 
     acquisition_cost: Money
     all_in_cost: Money
+    settlement_cost: Money
     expected_output_value: Money
     net_ev: Money
     net_roi: Decimal
@@ -179,6 +180,7 @@ class OperatorCard:
             "input_count": self.input_count,
             "acquisition_cost_minor": self.acquisition_cost.minor_units,
             "all_in_cost_minor": self.all_in_cost.minor_units,
+            "settlement_cost_minor": self.settlement_cost.minor_units,
             "expected_output_value_minor": self.expected_output_value.minor_units,
             "net_ev_minor": self.net_ev.minor_units,
             "net_roi": str(self.net_roi),
@@ -368,6 +370,14 @@ def build_operator_card(
         "Liquidity haircut and days-to-sale come from stated priors pending "
         "calibration against realised sales.",
     ]
+    if evaluation.settlement_cost.is_positive:
+        assumptions.append(
+            f"Settlement-rail charge {evaluation.settlement_cost} is included in the "
+            "all-in cost: an amortised share of one crypto capital round trip "
+            "(deposit/withdrawal fees, network costs, conversion spread and "
+            "volatility haircut). The haircut and the amortisation horizon are "
+            "stated priors pending calibration."
+        )
 
     warnings = [
         "This card is a recommendation to spend real money. Nothing here has been "
@@ -388,6 +398,7 @@ def build_operator_card(
         purchase_sequence=tuple(sequence),
         acquisition_cost=evaluation.acquisition_cost,
         all_in_cost=evaluation.all_in_cost,
+        settlement_cost=evaluation.settlement_cost,
         expected_output_value=evaluation.expected_output_value,
         net_ev=evaluation.ev_net,
         net_roi=evaluation.roi_net,

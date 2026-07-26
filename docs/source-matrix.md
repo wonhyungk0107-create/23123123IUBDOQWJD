@@ -302,6 +302,30 @@ DMarket actively markets the Trading API for automated trading, so automated
 access is plainly sanctioned in principle; the practical constraint is volume and
 conduct, governed by fair use plus the published rate limits.
 
+### Crypto funding and withdrawal
+
+Researched 2026-07-26 for the crypto settlement rail (`valuation/settlement.py`).
+
+- DMarket publishes help-centre articles titled "Crypto payments - funds deposit
+  and withdrawal" (`support.dmarket.com/hc/en-us/articles/43447619366929`) and
+  "Bitcoin - how to make a deposit?" (`.../articles/25195565108241`) — the URLs
+  and titles were confirmed via search results, but a direct fetch of the article
+  body returned **HTTP 403** (bot protection), so their contents are **SECONDARY**
+  at best. Nothing below may be treated as a configured fee.
+- Per search-result summaries of those articles (**SECONDARY**): deposits are
+  accepted in BTC, ETH, USDT (ERC-20), Bitcoin Cash, Litecoin and Solana; deposit
+  amounts are entered in USD and the balance is USD-denominated; DMarket itself
+  adds no crypto deposit fee but the payment processor's own fee applies
+  (reported "around 2%"); withdrawal is stated to carry no DMarket cashout fee,
+  only the provider's. **Every one of these fee statements is UNVERIFIED** — none
+  may enter a `FeeSchedule` until read from the operator's own account screen or a
+  directly rendered policy page, with a date.
+- Consequence for configuration: the crypto rail ships **disabled**, and the only
+  crypto fee schedule in the repository is the demo's clearly-labelled synthetic
+  one. Enabling the rail against DMarket requires sourcing, dating and entering
+  the real deposit, withdrawal, spread and network fees first — the fail-closed
+  `UnknownFeeError` path enforces this.
+
 **Unresolved questions.**
 
 - Which endpoint surface is live: Swagger (`/exchange/v1/offers-buy`) or the
@@ -315,7 +339,9 @@ conduct, governed by fair use plus the published rate limits.
 - Is the fee charged on a target fill the same as on a direct buy, and is it
   quoted before commitment?
 - Are DMarket balances withdrawable cash or venue-reusable, per balance type, and
-  what are the withdrawal fees? Nothing found in this pass.
+  what are the withdrawal fees? Help-centre articles on crypto deposit/withdrawal
+  exist but returned 403 on direct fetch; see "Crypto funding and withdrawal"
+  above. The fee figures remain UNVERIFIED.
 - Is 110 RPS on the fee bucket real or a typo?
 - Confirm the 7-day figure against a normative policy page rather than a blog.
 

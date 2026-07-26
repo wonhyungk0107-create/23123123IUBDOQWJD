@@ -245,6 +245,7 @@ class CandidateRepository:
             payment_surcharge_minor=evaluation.payment_surcharge.minor_units,
             acquisition_cost_minor=evaluation.acquisition_cost.minor_units,
             operational_cost_minor=evaluation.operational_cost.minor_units,
+            settlement_cost_minor=evaluation.settlement_cost.minor_units,
             capital_carry_cost_minor=evaluation.capital_carry_cost.minor_units,
             partial_fill_reserve_minor=evaluation.partial_fill_reserve.minor_units,
             all_in_cost_minor=evaluation.all_in_cost.minor_units,

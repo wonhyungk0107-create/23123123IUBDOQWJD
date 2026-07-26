@@ -92,6 +92,13 @@ CLI: `tradeup doctor` (is anything wired up?), `metadata import|validate`,
 6. An unknown material fee raises `UnknownFeeError` and rejects the candidate. A zero
    fee must be a sourced statement, never a failed lookup.
 7. Exact decimals persist as text. There is no `REAL` column on the money path.
+8. Cross-currency value moves only through `ConversionQuote` (rate + venue + source
+   + timestamp; exact rationals; costs convert rounding up, proceeds rounding down).
+   Crypto currencies use chain-native minor units — satoshi, wei, micro-USDT. The
+   crypto settlement rail (`valuation/settlement.py`) prices the capital round trip
+   and charges contracts `settlement_cost`; it is off by default, its haircut and
+   amortisation horizon are stated priors, and no real venue's crypto fees have
+   been sourced yet (see `docs/source-matrix.md`).
 
 ## Trade-up rules are versioned data
 

@@ -305,7 +305,8 @@ class CandidateEvaluation:
     # -- cost ---------------------------------------------------------------
     # ``acquisition_cost`` is the cash that actually leaves the wallet to buy the
     # inputs. ``all_in_cost`` adds the modelled charges that are real but not paid
-    # to a venue: operations, capital carry, and the partial-fill reserve.
+    # to a venue at purchase time: operations, the settlement-rail share, capital
+    # carry, and the partial-fill reserve.
     #
     # EV_net  = expected_output_value - all_in_cost
     # ROI_net = EV_net / acquisition_cost
@@ -320,6 +321,10 @@ class CandidateEvaluation:
     payment_surcharge: Money
     acquisition_cost: Money
     operational_cost: Money
+    #: Amortised share of the capital round trip through the settlement rail
+    #: (crypto deposit/withdrawal fees, network costs, conversion spread and
+    #: volatility haircut). Zero when settlement is same-currency fiat.
+    settlement_cost: Money
     capital_carry_cost: Money
     partial_fill_reserve: Money
     all_in_cost: Money

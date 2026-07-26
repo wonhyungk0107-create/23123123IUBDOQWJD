@@ -59,6 +59,7 @@ class LedgerEventType(enum.StrEnum):
     SALE = "SALE"
     SELLER_FEE = "SELLER_FEE"
     WITHDRAWAL_FEE = "WITHDRAWAL_FEE"
+    NETWORK_FEE = "NETWORK_FEE"
     REFUND = "REFUND"
     REVERSAL = "REVERSAL"
     WRITE_OFF = "WRITE_OFF"
@@ -96,6 +97,7 @@ _DIRECTION: dict[LedgerEventType, _Direction] = {
     LedgerEventType.SALE: _Direction.INFLOW,
     LedgerEventType.SELLER_FEE: _Direction.OUTFLOW,
     LedgerEventType.WITHDRAWAL_FEE: _Direction.OUTFLOW,
+    LedgerEventType.NETWORK_FEE: _Direction.OUTFLOW,
     LedgerEventType.REFUND: _Direction.INFLOW,
     LedgerEventType.REVERSAL: _Direction.EITHER,
     LedgerEventType.WRITE_OFF: _Direction.OUTFLOW,

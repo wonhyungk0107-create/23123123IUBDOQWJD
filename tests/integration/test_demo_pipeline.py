@@ -20,15 +20,20 @@ from tradeup.demo.runner import default_metadata_path, run_demo
 from tradeup.demo.scenario import DEMO_VENUE_A, DEMO_VENUE_B, build_demo_scenario
 from tradeup.domain.contracts import RejectionReason
 from tradeup.domain.items import Rarity
+from tradeup.domain.money import Currency
 from tradeup.metadata.bymykel import load_pinned_snapshot
 
 DEMO_NOW = datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC)
 
 
 def demo_settings(tmp_path: Path) -> Settings:
+    # The crypto rail is enabled the same way the CLI demo enables it, so the
+    # integration surface matches what `tradeup demo` actually runs.
     return Settings(
         database_url=f"sqlite+pysqlite:///{(tmp_path / 'demo.db').as_posix()}",
         artifacts_dir=tmp_path / "artifacts",
+        crypto_settlement_enabled=True,
+        settlement_currency=Currency.BTC,
     )
 
 
@@ -165,6 +170,26 @@ class TestEndToEnd:
         assert evidence["orders_placed"] == 0
         assert evidence["trade_ups_completed"] == 0
         assert evidence["sales_settled"] == 0
+
+    def test_the_settlement_rail_is_priced_and_charged(self, tmp_path: Path) -> None:
+        """The crypto round trip appears in the evidence and in each card's economics."""
+        result = run_demo(
+            settings=demo_settings(tmp_path), now=DEMO_NOW, output_dir=tmp_path / "evidence"
+        )
+        assert result.settlement_plan is not None
+        assert result.settlement_plan.round_trip_drag.is_positive
+
+        payload = json.loads(result.artifacts["json"].read_text(encoding="utf-8"))
+        rail = payload["crypto_settlement"]
+        assert rail["enabled"] is True
+        assert rail["pair"] == "BTC/USD"
+        assert rail["round_trip_drag_minor"] > 0
+        assert rail["data_nature"].startswith("SYNTHETIC")
+
+        card = result.cards[0]
+        assert card.settlement_cost.is_positive
+        assert any("settlement-rail" in a.lower() for a in card.assumptions)
+        assert any("crypto settlement rail" in w.lower() for w in card.warnings)
 
     def test_the_json_artifact_records_metadata_provenance(self, tmp_path: Path) -> None:
         result = run_demo(

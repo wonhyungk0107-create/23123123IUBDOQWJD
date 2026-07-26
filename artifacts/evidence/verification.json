@@ -2,47 +2,47 @@
   "all_gates_passed": true,
   "commands": {
     "coverage_floors": {
-      "command": "uv run python tools/check_coverage.py",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\python.exe tools/check_coverage.py",
       "exit_code": 0,
       "passed": true
     },
     "demo": {
-      "command": "uv run tradeup demo --quiet",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\tradeup.EXE demo --quiet",
       "exit_code": 0,
       "passed": true
     },
     "format_check": {
-      "command": "uv run ruff format --check .",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\ruff.EXE format --check .",
       "exit_code": 0,
       "passed": true
     },
     "lint": {
-      "command": "uv run ruff check .",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\ruff.EXE check .",
       "exit_code": 0,
       "passed": true
     },
     "migrate_down": {
-      "command": "uv run alembic downgrade base",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\alembic.EXE downgrade base",
       "exit_code": 0,
       "passed": true
     },
     "migrate_up": {
-      "command": "uv run alembic upgrade head",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\alembic.EXE upgrade head",
       "exit_code": 0,
       "passed": true
     },
     "no_placeholders": {
-      "command": "uv run python tools/check_no_placeholders.py",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\python.exe tools/check_no_placeholders.py",
       "exit_code": 0,
       "passed": true
     },
     "tests": {
-      "command": "uv run pytest --cov --cov-report=json",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\pytest.EXE --cov --cov-report=json",
       "exit_code": 0,
       "passed": true
     },
     "typecheck": {
-      "command": "uv run mypy",
+      "command": "C:\\Users\\pauld\\23123123IUBDOQWJD\\.venv\\Scripts\\mypy.EXE",
       "exit_code": 0,
       "passed": true
     }
@@ -50,9 +50,10 @@
   "coverage": {
     "critical_module_floor_percent": 90.0,
     "overall_floor_percent": 80.0,
-    "overall_percent": 85.3,
+    "overall_percent": 86.0,
     "per_critical_module": {
-      "src/tradeup/domain/fees.py": "90.7%",
+      "src/tradeup/domain/conversion.py": "100.0%",
+      "src/tradeup/domain/fees.py": "91.5%",
       "src/tradeup/domain/items.py": "98.6%",
       "src/tradeup/domain/mathematics.py": "96.6%",
       "src/tradeup/domain/money.py": "99.4%",
@@ -62,8 +63,9 @@
       "src/tradeup/optimizer/pareto.py": "94.9%",
       "src/tradeup/valuation/capital.py": "100.0%",
       "src/tradeup/valuation/exit_prices.py": "92.6%",
-      "src/tradeup/valuation/expected_value.py": "98.0%",
-      "src/tradeup/valuation/partial_fill.py": "96.0%"
+      "src/tradeup/valuation/expected_value.py": "98.1%",
+      "src/tradeup/valuation/partial_fill.py": "96.0%",
+      "src/tradeup/valuation/settlement.py": "100.0%"
     },
     "report": "coverage.json"
   },
@@ -83,7 +85,7 @@
     "platform": "Windows-11-10.0.26200-SP0",
     "python": "3.12.13"
   },
-  "generated_at": "2026-07-26T04:20:41.614881+00:00",
+  "generated_at": "2026-07-26T05:26:20.701791+00:00",
   "generated_by": "tools/write_verification.py",
   "live_checks": {
     "performed": false,
@@ -104,7 +106,7 @@
     "rejection_census": "ASSET_ALREADY_RESERVED=12;BELOW_DISCOVERY_ROI=19;BELOW_MIN_ABSOLUTE_PROFIT=2;LISTING_DISAPPEARED=13;LISTING_PRICE_CHANGED=12;QUOTE_TOO_OLD=28"
   },
   "tests": {
-    "count": 446,
+    "count": 489,
     "hypothesis_mode": "derandomize",
     "network_required": false
   }

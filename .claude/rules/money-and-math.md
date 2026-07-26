@@ -15,6 +15,10 @@ rather than an error.
 - A zero fee must be a stated fact with a source (`FeeSchedule.zero_quote`), never
   the result of a lookup that found nothing. Missing fee → `UnknownFeeError` → the
   candidate is rejected with `UNKNOWN_FEE`.
+- Cross-currency amounts convert only through `ConversionQuote.convert_cost` /
+  `convert_proceeds` — never an inline rate. A cost converts rounding up, proceeds
+  rounding down, and a stale or wrong-pair quote raises instead of converting.
+  Crypto minor units are chain-native: satoshi (BTC), wei (ETH), micro-USDT.
 
 ## Floats and probabilities
 

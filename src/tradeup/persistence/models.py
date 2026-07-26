@@ -214,6 +214,7 @@ class CandidateEvaluationRow(Base):
     payment_surcharge_minor: Mapped[int] = mapped_column(BigInteger)
     acquisition_cost_minor: Mapped[int] = mapped_column(BigInteger)
     operational_cost_minor: Mapped[int] = mapped_column(BigInteger)
+    settlement_cost_minor: Mapped[int] = mapped_column(BigInteger, default=0)
     capital_carry_cost_minor: Mapped[int] = mapped_column(BigInteger)
     partial_fill_reserve_minor: Mapped[int] = mapped_column(BigInteger)
     all_in_cost_minor: Mapped[int] = mapped_column(BigInteger)

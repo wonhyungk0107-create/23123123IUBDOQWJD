@@ -103,6 +103,51 @@ class Settings(BaseSettings):
     )
     operational_cost_per_contract_minor: int = Field(default=0, ge=0)
 
+    # -- crypto settlement rail ----------------------------------------------
+    crypto_settlement_enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether capital is funded and withdrawn through a crypto currency. "
+            "When true, the settlement round trip is priced and charged to contracts."
+        ),
+    )
+    settlement_currency: Currency = Field(
+        default=Currency.USD,
+        description=(
+            "Currency the operator actually holds outside venues. Must be a crypto "
+            "currency when the crypto rail is enabled, and fiat when it is not."
+        ),
+    )
+    crypto_wallet_address: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Operator's own withdrawal address, used only in operator instructions. "
+            "Never logged and never required for shadow scanning."
+        ),
+    )
+    max_conversion_quote_age_seconds: int = Field(
+        default=120,
+        gt=0,
+        description="Freshness limit for the crypto conversion quote. Stale fails closed.",
+    )
+    crypto_volatility_haircut: Decimal = Field(
+        default=Decimal("0.02"),
+        ge=Decimal(0),
+        lt=Decimal(1),
+        description=(
+            "Discount applied to withdrawal-leg crypto value for price movement "
+            "between quote and settlement. A stated prior, not a measurement."
+        ),
+    )
+    settlement_amortization_contracts: int = Field(
+        default=10,
+        ge=1,
+        description=(
+            "Contracts one capital round trip is assumed to support; the round-trip "
+            "drag is divided by this. A stated prior, not a measurement."
+        ),
+    )
+
     # -- persistence and artifacts -------------------------------------------
     database_url: str = "sqlite+pysqlite:///./tradeup.db"
     artifacts_dir: Path = Path("artifacts")
@@ -133,6 +178,27 @@ class Settings(BaseSettings):
             raise ValueError("ROI gates cannot be negative")
         if not (Decimal(0) <= self.max_unvaluable_probability_mass <= Decimal(1)):
             raise ValueError("max_unvaluable_probability_mass must be within [0, 1]")
+        return self
+
+    @model_validator(mode="after")
+    def _check_settlement_rail(self) -> Self:
+        if self.crypto_settlement_enabled and not self.settlement_currency.is_crypto:
+            raise ValueError(
+                f"crypto_settlement_enabled is true but settlement_currency is "
+                f"{self.settlement_currency}; the rail needs a crypto settlement currency"
+            )
+        if self.settlement_currency.is_crypto and not self.crypto_settlement_enabled:
+            raise ValueError(
+                f"settlement_currency is {self.settlement_currency} but the crypto rail is "
+                "disabled; enable crypto_settlement_enabled explicitly or use fiat"
+            )
+        if self.settlement_currency is not self.base_currency and (
+            not self.settlement_currency.is_crypto
+        ):
+            raise ValueError(
+                "cross-fiat settlement is not modelled; settlement_currency must be the "
+                "base currency or a crypto currency"
+            )
         return self
 
     @model_validator(mode="after")
@@ -191,6 +257,7 @@ class Settings(BaseSettings):
             "dmarket_secret_key": self.dmarket_secret_key is not None,
             "skinsnipe_api_key": self.skinsnipe_api_key is not None,
             "telegram_bot_token": self.telegram_bot_token is not None,
+            "crypto_wallet_address": self.crypto_wallet_address is not None,
         }
 
     def gate_summary(self) -> dict[str, str]:
@@ -208,6 +275,11 @@ class Settings(BaseSettings):
             "max_expected_capital_days": str(self.max_expected_capital_days),
             "max_unvaluable_probability_mass": str(self.max_unvaluable_probability_mass),
             "base_currency": self.base_currency.value,
+            "crypto_settlement_enabled": str(self.crypto_settlement_enabled),
+            "settlement_currency": self.settlement_currency.value,
+            "crypto_volatility_haircut": str(self.crypto_volatility_haircut),
+            "settlement_amortization_contracts": str(self.settlement_amortization_contracts),
+            "max_conversion_quote_age_seconds": str(self.max_conversion_quote_age_seconds),
         }
 
 
