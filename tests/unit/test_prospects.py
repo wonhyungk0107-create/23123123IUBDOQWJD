@@ -64,6 +64,7 @@ def sweep(**overrides: object):  # type: ignore[no-untyped-def]
         "base_currency": Currency.USD,
         "moment": SWEEP_NOW,
         "qualities": (QualityType.NORMAL,),
+        "include_mixed": False,
     }
     base.update(overrides)
     return sweep_prospects(**base)  # type: ignore[arg-type]
@@ -115,6 +116,40 @@ class TestGoldenSweep:
         prospects, statistics = sweep(quotes=quotes)
         assert all(p.collection_id != "col-a" for p in prospects)
         assert statistics.skipped_insufficient_depth >= 1
+
+
+class TestMixedSweep:
+    """Hand-computed mix: 9 col-a units dilute 1 col-b filler unit.
+
+    P(col-a pool) = 9/10 split over two outputs -> 9/20 each; P(col-b) = 1/10
+    with an unpriced output (tolerated at exactly the 1/10 policy limit, valued
+    zero). Cost = 6x1.00 + 3x1.20 + 1x0.50 = $10.10.
+    Value = 9/20*800 + 9/20*320 = 504 minor. EV = 504 - 1010 = -506.
+    """
+
+    def test_the_mixed_split_is_weighted_exactly_as_the_game_weights_it(self) -> None:
+        prospects, statistics = sweep(include_mixed=True)
+        mixed = [p for p in prospects if p.is_mixed]
+        assert len(mixed) == 1
+        mix = mixed[0]
+        assert mix.counts_by_collection == (("col-a", 9), ("col-b", 1))
+        assert mix.collection_id == "col-a"  # primary side: most inputs
+        assert mix.filler_collection_name == "col-b"
+        assert mix.estimated_cost == usd(1_010)
+        assert mix.estimated_output_value == usd(504)
+        assert mix.estimated_ev == usd(-506)
+        assert mix.outcome_count == 3
+        assert mix.unpriced_probability == Fraction(1, 10)
+        # Splits k_a=1..8 put >= 2/10 probability on the unpriced col-b pool and
+        # are dropped as unpriced, never valued optimistically.
+        assert statistics.mixed_considered == 9
+
+    def test_mixing_does_not_change_the_pure_results(self) -> None:
+        pure_only, _ = sweep()
+        with_mixed, _ = sweep(include_mixed=True)
+        pure_from_mixed = [p for p in with_mixed if not p.is_mixed]
+        assert [p.estimated_ev for p in pure_from_mixed] == [p.estimated_ev for p in pure_only]
+        assert all(p.counts_by_collection == ((p.collection_id, 10),) for p in pure_only)
 
 
 class TestPolicyGuards:

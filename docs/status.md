@@ -50,7 +50,7 @@ through the project venv's own launchers, and the exact commands are recorded in
 
 ## Tests
 
-**531 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
+**533 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
 The opt-in live suite (`pytest -m live`) additionally passed 6/6 on 2026-07-26 with
 real credentials, and live shadow scans ran end to end — see Live checks.
 
@@ -64,7 +64,7 @@ real credentials, and live shadow scans ran end to end — see Live checks.
 
 ## Coverage
 
-Overall **85.7%** (floor 80%; the live-scan orchestration module is exercised by
+Overall **85.5%** (floor 80%; the live-scan orchestration module is exercised by
 the live runs rather than the mandatory suite). Money-critical modules, floor 90%:
 
 | Module | Branch coverage |
@@ -254,15 +254,33 @@ the *cheapest* bundle per composition and the candidate cap truncates by
 enumeration order, so the promising collections were never actually examined,
 and the strongest prospects are StatTrak, which the live scan does not yet query.
 
+### Mixed collections and the confirm loop — 2026-07-26 (second pass)
+
+The sweep now evaluates **two-collection mixes** with the game's exact weighting
+(`k` inputs shift `k/N` of the outcome probability), pruned to the cheapest
+fillers and hand-computed in a golden test: **224,853 mixed splits** evaluated
+live alongside the 2,235 pure sketches, 206,666 ranked prospects. The top of the
+board is Genesis StatTrak WW pure plus its cheap-filler dilutions — the classic
+public-calculator pattern, reproduced from licit data.
+
+`tradeup candidates confirm --rank N` then closes the loop TradeUpSpy leaves
+open: it fetches **exact buy-now listings with exact floats** for precisely the
+prospect's input names (documented `market_hash_name` + `category` filters;
+StatTrak supported end to end) and runs the full gate stack. First confirmation,
+measured: the sweep's **+528.10%** ask-based estimate came back **−27.75%** on
+15 exact listings (all 25 output names priced from completed sales). Asks are
+aspirations; sale medians at the low quantile, fee-net, are not. That ~556-point
+estimate-versus-executable gap is the first calibration data point for the
+sweep's haircuts.
+
 ## The single highest-value next task
 
-**Close the prospect→confirmation gap.** Three concrete pieces: (1) StatTrak
-support in the live scan (the sweep's best leads are StatTrak; `category=2` is
-already a documented CSFloat filter); (2) per-prospect targeting — drive the scan
-from a chosen prospect's input names via the documented `market_hash_name`
-filter, instead of a global price band, so the exact collections the sweep
-flagged are the ones examined; (3) candidate selection by prospect promise
-rather than enumeration order. Once a sweep lead survives the exact-listing
-gates, revalidation starts producing the listing-survival measurement that
-calibrates the bundle-completion prior — still the least-evidenced number in the
-model.
+**Run the confirm loop over the top-N prospects and record the gap
+distribution.** One confirmation is an anecdote; fifty are a calibration curve.
+Confirm the top prospects across several sweeps (respecting the measured
+CSFloat 200/window and Skinport 8-per-5-minutes budgets), persist
+estimated-versus-exact ROI pairs, and refit the sweep's ask haircut from the
+measured gap so the ranked board starts predicting what the gates will actually
+say. Any lead that survives discovery then feeds revalidation — the
+listing-survival measurement that calibrates the bundle-completion prior, still
+the least-evidenced number in the model.

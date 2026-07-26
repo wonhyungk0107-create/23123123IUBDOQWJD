@@ -323,6 +323,102 @@ def candidates_prospects(
         )
 
 
+@candidates_app.command("confirm")
+def candidates_confirm(
+    rank: Annotated[int, typer.Option(help="1-based rank in the prospects artifact.")] = 1,
+    artifact: Annotated[
+        Path | None, typer.Option(help="Prospects JSON; defaults to the newest one.")
+    ] = None,
+    per_name_limit: Annotated[
+        int, typer.Option(help="Exact listings to fetch per input name.")
+    ] = 15,
+    max_candidates: Annotated[int, typer.Option(help="Cap on candidates evaluated.")] = 10,
+    output: Annotated[Path | None, typer.Option(help="Directory for artifacts.")] = None,
+    quiet: Annotated[bool, typer.Option(help="Only print the summary.")] = False,
+) -> None:
+    """Confirm one swept prospect against exact live listings with exact floats.
+
+    Fetches real buy-now listings for exactly the prospect's input names (mixed
+    collections included), then runs the full pipeline: exact floats, exact
+    probabilities, fee-net EV, risk gates and direct revalidation.
+    """
+    from tradeup.domain.items import QualityType
+    from tradeup.pipeline.live_scan import LiveScanError, run_live_scan
+    from tradeup.reporting.renderers import render_card_console, render_ranked_table
+
+    settings = _settings()
+    _echo_boundary(settings)
+
+    source = artifact
+    if source is None:
+        candidates_files = sorted(settings.reports_dir.glob("prospects-*.json"))
+        if not candidates_files:
+            typer.echo("no prospects artifact found; run 'tradeup candidates prospects' first")
+            raise typer.Exit(1)
+        source = candidates_files[-1]
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    prospects = payload.get("prospects", [])
+    if not 1 <= rank <= len(prospects):
+        typer.echo(f"artifact {source.name} has {len(prospects)} prospects; rank {rank} invalid")
+        raise typer.Exit(1)
+    prospect = prospects[rank - 1]
+
+    names = [entry["market_hash_name"] for entry in prospect["inputs"]]
+    quality = QualityType(prospect["quality"])
+    rarity = Rarity(prospect["input_rarity"])
+    typer.echo(
+        f"confirming prospect #{rank} from {source.name}: "
+        f"{prospect['collection_name']}"
+        + (
+            f" + {prospect['filler_collection_name']}"
+            if prospect.get("filler_collection_name")
+            else ""
+        )
+        + f" ({quality.value}, {prospect['input_wear']}, "
+        f"estimated ROI {prospect['estimated_roi'][:8]})"
+    )
+    typer.echo(
+        "LIVE read-only confirmation. The estimate above came from asks; the gates "
+        "below run on exact purchasable listings and exact floats.\n"
+    )
+    try:
+        result = run_live_scan(
+            settings=settings,
+            now=_now(),
+            input_rarity=rarity,
+            quality=quality,
+            target_names=names,
+            per_name_limit=per_name_limit,
+            max_candidates=max_candidates,
+            output_dir=output,
+        )
+    except LiveScanError as exc:
+        typer.echo(f"confirmation blocked: {exc}")
+        raise typer.Exit(1) from exc
+
+    if not quiet:
+        typer.echo(render_ranked_table(list(result.cards)))
+        for card in result.cards:
+            typer.echo("")
+            typer.echo(render_card_console(card))
+
+    stats = result.report.statistics
+    typer.echo("\nSCAN STATISTICS")
+    for key, value in stats.summary().items():
+        typer.echo(f"  {key:<26} {value}")
+    typer.echo(f"  listings_fetch             {result.listings_fetch_detail[:160]}")
+    typer.echo(f"  output_pricing             {result.observations_detail}")
+
+    typer.echo("\nARTIFACTS")
+    for kind, path in sorted(result.artifacts.items()):
+        typer.echo(f"  {kind:<10} {path}")
+
+    typer.echo(
+        f"\n{result.approved_count} candidate(s) cleared all gates, "
+        f"{result.rejected_count} rejected. Nothing was bought; this is a measurement."
+    )
+
+
 @candidates_app.command("scan-live")
 def candidates_scan_live(
     rarity: Annotated[str, typer.Option(help="Input rarity to scan.")] = "MIL_SPEC",

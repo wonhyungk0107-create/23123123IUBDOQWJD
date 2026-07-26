@@ -136,6 +136,7 @@ def _wanted_output_names(
     registry: MetadataRegistry,
     listings: Sequence[MarketplaceListing],
     input_rarity: Rarity,
+    quality: QualityType,
 ) -> tuple[dict[str, WantedName], tuple[str, ...], tuple[str, ...]]:
     """Names to price, budgeted by collection liquidity.
 
@@ -159,11 +160,11 @@ def _wanted_output_names(
             if not registry.has_skin(skin_id):
                 continue
             skin = registry.skin(skin_id)
-            if not skin.supports(QualityType.NORMAL):
+            if not skin.supports(quality):
                 continue
             for wear in skin.float_range.reachable_wears:
-                name = skin.market_hash_name(QualityType.NORMAL, wear)
-                names[name] = (skin_id, QualityType.NORMAL, wear)
+                name = skin.market_hash_name(quality, wear)
+                names[name] = (skin_id, quality, wear)
         if not names:
             skipped.append(collection_id)
             continue
@@ -179,9 +180,12 @@ async def _gather_market_data(
     settings: Settings,
     registry: MetadataRegistry,
     input_rarity: Rarity,
+    quality: QualityType,
     listing_limit: int,
     now: datetime,
     price_band: tuple[Money | None, Money | None],
+    target_names: Sequence[str],
+    per_name_limit: int,
 ) -> tuple[
     CapabilityResult[Sequence[MarketplaceListing]],
     CSFloatAdapter,
@@ -215,24 +219,59 @@ async def _gather_market_data(
     )
 
     min_price, max_price = price_band
-    listings_result = await csfloat.fetch_listings(
-        ListingQuery(
-            rarity=input_rarity,
-            quality=QualityType.NORMAL,
-            limit=listing_limit,
-            min_price=min_price,
-            max_price=max_price,
-        ),
-        moment=now,
-    )
-    if not listings_result.ok:
-        await client.aclose()
-        raise LiveScanError(
-            f"csfloat listings fetch refused: {listings_result.status.value} "
-            f"({listings_result.detail})"
+    if target_names:
+        # Prospect-targeted mode: exact listings for exactly the input names the
+        # sweep flagged, one documented market_hash_name query per name.
+        collected: list[MarketplaceListing] = []
+        details: list[str] = []
+        unique_names = list(dict.fromkeys(target_names))
+        for name in unique_names:
+            per_name = await csfloat.fetch_listings(
+                ListingQuery(market_hash_name=name, quality=quality, limit=per_name_limit),
+                moment=now,
+            )
+            if not per_name.ok:
+                await client.aclose()
+                raise LiveScanError(
+                    f"csfloat fetch for {name!r} refused: {per_name.status.value} "
+                    f"({per_name.detail})"
+                )
+            collected.extend(per_name.unwrap())
+            if per_name.detail:
+                details.append(f"{name}: {per_name.detail}")
+        listings_result: CapabilityResult[Sequence[MarketplaceListing]] = (
+            CapabilityResult.succeeded(
+                csfloat.venue,
+                "fetch_listings",
+                now,
+                tuple(collected),
+                detail=(
+                    f"{len(collected)} listings across {len(unique_names)} targeted names; "
+                    + " | ".join(details)
+                ),
+            )
         )
+    else:
+        listings_result = await csfloat.fetch_listings(
+            ListingQuery(
+                rarity=input_rarity,
+                quality=quality,
+                limit=listing_limit,
+                min_price=min_price,
+                max_price=max_price,
+            ),
+            moment=now,
+        )
+        if not listings_result.ok:
+            await client.aclose()
+            raise LiveScanError(
+                f"csfloat listings fetch refused: {listings_result.status.value} "
+                f"({listings_result.detail})"
+            )
 
-    wanted, priced, skipped = _wanted_output_names(registry, listings_result.unwrap(), input_rarity)
+    wanted, priced, skipped = _wanted_output_names(
+        registry, listings_result.unwrap(), input_rarity, quality
+    )
     skinport = SkinportPriceSource(rest)
     observations_result = await skinport.fetch_sales_observations(wanted, moment=now)
     if not observations_result.ok:
@@ -258,10 +297,13 @@ def run_live_scan(
     settings: Settings,
     now: datetime,
     input_rarity: Rarity = Rarity.MIL_SPEC,
+    quality: QualityType = QualityType.NORMAL,
     listing_limit: int = 150,
     max_candidates: int = 12,
     min_price: Money | None = None,
     max_price: Money | None = None,
+    target_names: Sequence[str] = (),
+    per_name_limit: int = 15,
     output_dir: Path | None = None,
 ) -> LiveScanResult:
     """One complete read-only shadow scan against the live market.
@@ -295,7 +337,15 @@ def run_live_scan(
             wanted_count,
             client,
         ) = await _gather_market_data(
-            settings, registry, input_rarity, listing_limit, now, (min_price, max_price)
+            settings,
+            registry,
+            input_rarity,
+            quality,
+            listing_limit,
+            now,
+            (min_price, max_price),
+            target_names,
+            per_name_limit,
         )
         try:
             capital_model = CapitalModel(annual_rate=settings.annual_capital_cost_rate)
@@ -322,7 +372,9 @@ def run_live_scan(
             )
             report = await pipeline.run(
                 [_PrefetchedListingsAdapter(csfloat, listings_result)],
-                ScanConfig(input_rarity=input_rarity, max_candidates=max_candidates),
+                ScanConfig(
+                    input_rarity=input_rarity, quality=quality, max_candidates=max_candidates
+                ),
                 moment=now,
                 price_observations=observations,
                 fee_schedule_id=LIVE_FEE_SCHEDULE_ID,

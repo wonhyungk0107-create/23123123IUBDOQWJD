@@ -33,7 +33,9 @@ class TestWantedOutputNames:
         listings = [make_listing(f"A-{i}") for i in range(3)] + [
             make_listing("B-1", skin_id="b-in-1", collection_id="col-b")
         ]
-        wanted, priced, skipped = _wanted_output_names(registry, listings, Rarity.MIL_SPEC)
+        wanted, priced, skipped = _wanted_output_names(
+            registry, listings, Rarity.MIL_SPEC, QualityType.NORMAL
+        )
         assert priced == ("col-a", "col-b")
         assert skipped == ()
         # col-a has two RESTRICTED outputs, col-b one; full range reaches all 5 wears.
@@ -51,7 +53,9 @@ class TestWantedOutputNames:
         listings = [make_listing(f"A-{i}") for i in range(3)] + [
             make_listing("B-1", skin_id="b-in-1", collection_id="col-b")
         ]
-        wanted, priced, skipped = _wanted_output_names(registry, listings, Rarity.MIL_SPEC)
+        wanted, priced, skipped = _wanted_output_names(
+            registry, listings, Rarity.MIL_SPEC, QualityType.NORMAL
+        )
         # col-a (3 live listings) fills the budget; col-b is skipped and SAID so.
         assert priced == ("col-a",)
         assert skipped == ("col-b",)
