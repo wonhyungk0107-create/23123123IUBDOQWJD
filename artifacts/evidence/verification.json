@@ -85,7 +85,7 @@
     "platform": "Windows-11-10.0.26200-SP0",
     "python": "3.12.13"
   },
-  "generated_at": "2026-07-26T07:58:35.251469+00:00",
+  "generated_at": "2026-07-26T08:09:42.371164+00:00",
   "generated_by": "tools/write_verification.py",
   "live_checks": {
     "performed_by_this_tool": false,

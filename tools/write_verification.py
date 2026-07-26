@@ -15,11 +15,13 @@ Usage::
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -59,8 +61,10 @@ def _resolve(command: list[str]) -> list[str]:
     return [sys.executable, "-m", head, *rest]
 
 
-def _run(command: list[str]) -> tuple[int, str]:
-    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+def _run(command: list[str], env: dict[str, str]) -> tuple[int, str]:
+    result = subprocess.run(
+        command, cwd=REPO_ROOT, capture_output=True, text=True, check=False, env=env
+    )
     return result.returncode, (result.stdout or "") + (result.stderr or "")
 
 
@@ -73,9 +77,16 @@ def main() -> int:
     results: dict[str, dict[str, object]] = {}
     outputs: dict[str, str] = {}
 
+    # The battery migrates down to base and re-runs the demo, which would destroy
+    # operator state — including the append-only calibration history — if it ran
+    # against the real database. Every gate therefore runs on a throwaway file.
+    scratch = tempfile.mkdtemp(prefix="tradeup-verify-")
+    scratch_db = (Path(scratch) / "verify.db").as_posix()
+    env = {**os.environ, "TRADEUP_DATABASE_URL": f"sqlite+pysqlite:///{scratch_db}"}
+
     for name, command in COMMANDS:
         actual = _resolve(command)
-        code, output = _run(actual)
+        code, output = _run(actual, env)
         outputs[name] = output
         results[name] = {
             "command": " ".join(actual),
@@ -84,6 +95,7 @@ def main() -> int:
         }
         status = "ok" if code == 0 else "FAILED"
         print(f"{name:<18} exit={code:<3} {status}")
+    shutil.rmtree(scratch, ignore_errors=True)
 
     test_output = outputs.get("tests", "")
     test_count = _search(r"(\d+) passed", test_output)

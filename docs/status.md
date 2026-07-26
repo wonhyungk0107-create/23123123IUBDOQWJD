@@ -292,12 +292,21 @@ haircut **≈0.78** (n=3, explicitly unreliable). Applied via
 **+9.52%** at the top — estimate and measurement now live in the same universe,
 which is what the flywheel is for.
 
+The batch is now **scheduled**: a Windows task runs
+`tools/run_confirm_batch.ps1` every 8 hours (see the operator runbook), logging
+to `artifacts/logs/`. Its first unattended run completed exit 0 and persisted
+its rows. Running it also exposed and fixed a data-loss defect: the
+verification battery's `downgrade base` was executing against the operator
+database and destroyed the first batch's calibration rows;
+`tools/write_verification.py` now runs every gate against a throwaway database,
+verified by re-running the battery and finding the history intact.
+
 ## The single highest-value next task
 
-**Accumulate the calibration curve.** Run `confirm-batch` a few times a day
-(each batch of 3 respects both measured API budgets without pausing) until the
-per-quality recommendations cross the 10-sample reliability bar, re-sweeping
-under the fitted haircut as it firms up. When a lead clears discovery under the
-calibrated estimate *and* survives the exact-listing gates, revalidation starts
-producing the listing-survival measurement that calibrates the
-bundle-completion prior — still the least-evidenced number in the model.
+**Let the schedule accumulate the calibration curve.** Three confirmations land
+every 8 hours automatically; when the per-quality recommendations cross the
+10-sample reliability bar, re-sweep under the fitted haircut
+(`candidates prospects --ask-haircut <rec>`). When a lead clears discovery
+under the calibrated estimate *and* survives the exact-listing gates,
+revalidation starts producing the listing-survival measurement that calibrates
+the bundle-completion prior — still the least-evidenced number in the model.

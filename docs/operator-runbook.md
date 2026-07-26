@@ -90,3 +90,22 @@ losses past your limit.
 
 Nothing has been bought. No trade-up has been performed. No profit has settled.
 `tradeup ledger reconcile` reports `$0.00` and zero events, and that is accurate.
+
+## Scheduled confirm-and-calibrate batches
+
+A Windows scheduled task named **"CS2 Tradeup Confirm Batch"** runs
+`tools/run_confirm_batch.ps1` every 8 hours (from 08:00, while the user is
+logged on). Each run executes `tradeup candidates confirm-batch --top 3` —
+read-only, within both measured API budgets — and appends its output to
+`artifacts/logs/confirm-batch-<date>.log` (gitignored).
+
+- Inspect: `schtasks /Query /TN "CS2 Tradeup Confirm Batch" /V /FO LIST`
+- Run now: `schtasks /Run /TN "CS2 Tradeup Confirm Batch"`
+- Remove: `schtasks /Delete /TN "CS2 Tradeup Confirm Batch" /F`
+- Review the accumulated fit at any time: `tradeup candidates calibration`
+
+The calibration history lives in the operator database (`tradeup.db`,
+`prospect_confirmations`, append-only). The verification battery
+(`tools/write_verification.py`) runs against a throwaway database precisely so
+it can never destroy this history; do not run raw `alembic downgrade` against
+the operator database either.
