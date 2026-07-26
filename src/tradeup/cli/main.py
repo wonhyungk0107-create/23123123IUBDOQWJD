@@ -521,6 +521,28 @@ def candidates_confirm(
             typer.echo("")
             typer.echo(render_card_console(card))
 
+    if result.acquisition_reference:
+        typer.echo(
+            "\nCROSS-MARKET ACQUISITION REFERENCE (name-level asks; floats unknown; "
+            "purchase is operator-manual; buy-side payment fees UNVERIFIED)"
+        )
+        for ref in result.acquisition_reference:
+            min_ask = (
+                f"{ref.min_ask.as_major()} {ref.min_ask.currency.value}"
+                if ref.min_ask is not None
+                else "none listed"
+            )
+            median = (
+                f"{ref.median_ask.as_major()} {ref.median_ask.currency.value}"
+                if ref.median_ask is not None
+                else "none listed"
+            )
+            typer.echo(
+                f"  {ref.market_hash_name}  [{ref.venue}]  "
+                f"min ask {min_ask}  median {median}  x{ref.quantity} available"
+            )
+        typer.echo(f"  ({result.acquisition_reference_detail}; reference only, not gate input)")
+
     stats = result.report.statistics
     typer.echo("\nSCAN STATISTICS")
     for key, value in stats.summary().items():

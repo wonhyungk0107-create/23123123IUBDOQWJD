@@ -21,6 +21,7 @@ from tradeup.domain.items import QualityType, WearCondition
 from tradeup.domain.money import Money
 
 __all__ = [
+    "AcquisitionReference",
     "OutputValuation",
     "PriceObservation",
     "ValuationConfidence",
@@ -136,6 +137,34 @@ class PriceObservation:
     def age_seconds(self, now: datetime) -> Decimal:
         delta = (now - self.observed_at).total_seconds()
         return Decimal(str(max(delta, 0.0))).quantize(Decimal("0.001"))
+
+
+@dataclass(frozen=True, slots=True)
+class AcquisitionReference:
+    """Name-level ask evidence for one targeted input name at one venue.
+
+    Aggregate figures only: the venue's documented API states no floats and no
+    listing IDs for these, and documents no purchase endpoint, so acting on them
+    is a manual operator decision. They never enter the optimizer, the expected
+    value engine or a gate — an exact-asset contract cannot be built from a
+    number that does not identify an asset.
+    """
+
+    market_hash_name: str
+    venue: str
+    min_ask: Money | None
+    median_ask: Money | None
+    quantity: int
+    observed_at: datetime
+
+    def __post_init__(self) -> None:
+        if self.observed_at.tzinfo is None:
+            raise ValueError("observed_at must be timezone-aware UTC")
+        if self.quantity < 0:
+            raise ValueError("quantity cannot be negative")
+        for label, price in (("min_ask", self.min_ask), ("median_ask", self.median_ask)):
+            if price is not None and price.is_negative:
+                raise ValueError(f"{label} cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)

@@ -24,7 +24,12 @@ import pytest
 
 from tradeup.adapters.base import ListingQuery
 from tradeup.adapters.csfloat import CSFLOAT_BASE_URL, CSFloatAdapter
-from tradeup.adapters.dmarket import DMarketAdapter, build_signature_payload, encode_query
+from tradeup.adapters.dmarket import (
+    DMarketAdapter,
+    Ed25519Signer,
+    build_signature_payload,
+    encode_query,
+)
 from tradeup.adapters.http import (
     FixtureTransport,
     HttpResponse,
@@ -562,6 +567,62 @@ class TestDMarketSigning:
         result = asyncio.run(adapter.fetch_account_state(moment=NOW))
         assert not result.ok
         assert "disputed" in result.detail
+
+
+#: RFC 8032 §7.1 published test vectors (TEST 1 and TEST 2) — external golden
+#: values, never computed by the implementation under test.
+_RFC8032_SEED_1 = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
+_RFC8032_PUBLIC_1 = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+_RFC8032_SIG_1 = (
+    "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a3"
+    "3bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+)
+_RFC8032_SEED_2 = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"
+_RFC8032_PUBLIC_2 = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+_RFC8032_SIG_2 = (
+    "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15"
+    "996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+)
+
+
+class TestEd25519Signer:
+    def test_signs_rfc8032_vector_1_empty_message(self) -> None:
+        signer = Ed25519Signer.from_hex(_RFC8032_SEED_1)
+        assert signer.sign(b"").hex() == _RFC8032_SIG_1
+        assert signer.public_key_hex == _RFC8032_PUBLIC_1
+
+    def test_signs_rfc8032_vector_2_one_byte_message(self) -> None:
+        signer = Ed25519Signer.from_hex(_RFC8032_SEED_2)
+        assert signer.sign(bytes.fromhex("72")).hex() == _RFC8032_SIG_2
+        assert signer.public_key_hex == _RFC8032_PUBLIC_2
+
+    def test_accepts_the_expanded_seed_public_form(self) -> None:
+        signer = Ed25519Signer.from_hex(_RFC8032_SEED_1 + _RFC8032_PUBLIC_1)
+        assert signer.sign(b"").hex() == _RFC8032_SIG_1
+
+    def test_rejects_an_expanded_key_with_a_mismatched_public_half(self) -> None:
+        with pytest.raises(ValueError, match="corrupt"):
+            Ed25519Signer.from_hex(_RFC8032_SEED_1 + _RFC8032_PUBLIC_2)
+
+    def test_rejects_non_hex_and_wrong_lengths(self) -> None:
+        with pytest.raises(ValueError, match="not valid hex"):
+            Ed25519Signer.from_hex("zz" * 32)
+        with pytest.raises(ValueError, match="32 or 64 bytes"):
+            Ed25519Signer.from_hex("ab" * 16)
+
+    def test_signed_headers_carry_the_rfc_vector_signature(self) -> None:
+        """End-to-end: the header is the prefix plus the hex of the payload's
+        signature, where sign() itself is pinned by the RFC vectors above."""
+        signer = Ed25519Signer.from_hex(_RFC8032_SEED_1)
+        client = RestClient(transport=FixtureTransport({}), user_agent="t")
+        adapter = DMarketAdapter(client, public_key=_RFC8032_PUBLIC_1, signer=signer)
+        headers = adapter.signed_headers("GET", "/x?y=1", "", 1700)
+        payload = build_signature_payload("GET", "/x?y=1", "", 1700)
+        assert headers["X-Api-Key"] == _RFC8032_PUBLIC_1
+        assert headers["X-Sign-Date"] == "1700"
+        assert headers["X-Request-Sign"] == f"dmar ed25519 {signer.sign(payload.encode()).hex()}"
+        signature_hex = headers["X-Request-Sign"].removeprefix("dmar ed25519 ")
+        assert len(bytes.fromhex(signature_hex)) == 64
 
 
 class TestManualAndBlockedVenues:

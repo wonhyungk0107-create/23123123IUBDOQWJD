@@ -27,6 +27,14 @@ the endpoint surface (Swagger says ``PATCH /exchange/v1/offers-buy`` and
 ``GET /account/v1/balance``; the dmarket-doc repository says
 ``POST /trading/v1/buy/offers`` and ``GET /account/v1/user/balance``). No purchase
 call is implemented while that disagreement stands.
+
+**Measured 2026-07-26:** the signing scheme is verified live (signed
+``/trade-aggregator/v1/last-sales`` and ``/account/v1/user`` answer 200), but the
+``/exchange/v1`` market reads this adapter parses are **retired at the venue** —
+both answer 410 Gone naming ``/marketplace-api/v2/offers`` as the replacement,
+whose schema differs and is not yet pinned (docs/source-matrix.md). Until that
+migration, ``fetch_listings``/``verify_listing`` fail typed and loud with the
+venue's 410 detail; they do not fall back to anything.
 """
 
 from __future__ import annotations
@@ -37,6 +45,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote
+
+from nacl.signing import SigningKey
 
 from tradeup.adapters.base import AccountState, ListingQuery, ListingVerification, MarketAdapter
 from tradeup.adapters.http import (
@@ -57,10 +67,16 @@ from tradeup.domain.listings import (
 )
 from tradeup.domain.money import BalanceType, Currency, Money
 
-__all__ = ["DMARKET_BASE_URL", "DMarketAdapter", "build_signature_payload"]
+__all__ = ["DMARKET_BASE_URL", "DMarketAdapter", "Ed25519Signer", "build_signature_payload"]
 
 DMARKET_BASE_URL = "https://api.dmarket.com"
 VENUE = "dmarket"
+
+#: An Ed25519 seed is 32 bytes; DMarket's dashboard exports the secret as either
+#: the bare seed (64 hex chars) or libsodium's expanded form seed||public
+#: (128 hex chars). Anything else is a corrupted paste, not a key.
+_SEED_BYTES = 32
+_EXPANDED_BYTES = 64
 
 _TRANSPORT_STATUS: Mapping[type[TransportError], CapabilityStatus] = {
     TransportAuthError: CapabilityStatus.AUTHENTICATION_REQUIRED,
@@ -68,6 +84,57 @@ _TRANSPORT_STATUS: Mapping[type[TransportError], CapabilityStatus] = {
     TransportTimeout: CapabilityStatus.TEMPORARILY_UNAVAILABLE,
     TransportSchemaError: CapabilityStatus.TEMPORARILY_UNAVAILABLE,
 }
+
+
+class Ed25519Signer:
+    """Ed25519 request signer over libsodium (PyNaCl), for DMarket's scheme.
+
+    ``sign`` returns the 64-byte detached signature; ``signed_headers`` hex-encodes
+    it. Deterministic by construction (RFC 8032), so the same request signs to the
+    same bytes — which is what makes signatures testable against published vectors.
+    """
+
+    def __init__(self, seed: bytes) -> None:
+        if len(seed) != _SEED_BYTES:
+            raise ValueError(f"Ed25519 seed must be {_SEED_BYTES} bytes, got {len(seed)}")
+        self._key = SigningKey(seed)
+
+    @classmethod
+    def from_hex(cls, secret_key_hex: str) -> Ed25519Signer:
+        """Build from DMarket's hex secret, failing closed on anything malformed.
+
+        The 128-hex expanded form embeds the public key in its second half; when
+        that half does not match the key the seed derives, the paste is corrupt and
+        signing with it would produce a signature the venue rejects with an
+        indistinguishable 401 — so it raises here instead.
+        """
+        try:
+            raw = bytes.fromhex(secret_key_hex.strip())
+        except ValueError as exc:
+            raise ValueError("DMarket secret key is not valid hex") from exc
+        if len(raw) == _SEED_BYTES:
+            return cls(raw)
+        if len(raw) == _EXPANDED_BYTES:
+            signer = cls(raw[:_SEED_BYTES])
+            derived_public = bytes(signer._key.verify_key)
+            if raw[_SEED_BYTES:] != derived_public:
+                raise ValueError(
+                    "DMarket secret key is corrupt: its embedded public half does "
+                    "not match the key its seed derives"
+                )
+            return signer
+        raise ValueError(
+            f"DMarket secret key must be {_SEED_BYTES} or {_EXPANDED_BYTES} bytes of "
+            f"hex, got {len(raw)}"
+        )
+
+    @property
+    def public_key_hex(self) -> str:
+        """Lowercase hex of the derived public key — DMarket's ``X-Api-Key`` value."""
+        return bytes(self._key.verify_key).hex()
+
+    def sign(self, payload: bytes) -> bytes:
+        return self._key.sign(payload).signature
 
 
 def build_signature_payload(method: str, path_and_query: str, body: str, timestamp: int) -> str:
@@ -267,16 +334,25 @@ class DMarketAdapter(MarketAdapter):
                 CapabilityStatus.AUTHENTICATION_REQUIRED,
                 "DMARKET_PUBLIC_KEY and DMARKET_SECRET_KEY are not configured",
             )
-        params = {"gameId": "a8db", "limit": str(query.limit), "currency": "USD"}
+        # Both official sources still document /exchange/v1/market/items, but it
+        # answered 410 Gone on 2026-07-26 (docs/source-matrix.md). Exact-name
+        # queries — the only shape the pipeline needs — go through the equally
+        # documented /exchange/v1/offers-by-title, which answers.
         if query.market_hash_name:
-            params["title"] = query.market_hash_name
-        path = "/exchange/v1/market/items"
+            path = "/exchange/v1/offers-by-title"
+            params = {"Title": query.market_hash_name, "Limit": str(query.limit)}
+        else:
+            path = "/exchange/v1/market/items"
+            params = {"gameId": "a8db", "limit": str(query.limit), "currency": "USD"}
         query_string = encode_query(params)
         timestamp = int(moment.timestamp())
         try:
             headers = self.signed_headers("GET", path + query_string, "", timestamp)
+            # The query is embedded in the URL so the bytes sent are exactly the
+            # bytes signed; letting the HTTP layer re-encode params can diverge
+            # from encode_query and invalidate the signature remotely.
             response = await self._client.get(
-                f"{self._base_url}{path}", params=params, headers=headers
+                f"{self._base_url}{path}{query_string}", headers=headers
             )
             document = response.json()
             rows = document.get("objects") if isinstance(document, Mapping) else None
@@ -301,11 +377,12 @@ class DMarketAdapter(MarketAdapter):
             )
         params = {"gameId": "a8db", "itemId": identity.listing_id, "currency": "USD"}
         path = "/exchange/v1/market/items"
+        query_string = encode_query(params)
         timestamp = int(moment.timestamp())
         try:
-            headers = self.signed_headers("GET", path + encode_query(params), "", timestamp)
+            headers = self.signed_headers("GET", path + query_string, "", timestamp)
             response = await self._client.get(
-                f"{self._base_url}{path}", params=params, headers=headers
+                f"{self._base_url}{path}{query_string}", headers=headers
             )
             document = response.json()
             rows = document.get("objects") if isinstance(document, Mapping) else []

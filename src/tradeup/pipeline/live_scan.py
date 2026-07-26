@@ -20,7 +20,7 @@ prefetched wrapper; revalidation still goes to the live venue directly, because
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -30,7 +30,7 @@ import httpx
 from tradeup.adapters.base import ListingQuery, ListingVerification, MarketAdapter
 from tradeup.adapters.csfloat import CSFloatAdapter
 from tradeup.adapters.http import HttpxTransport, RestClient, RetryPolicy
-from tradeup.adapters.skinport import SkinportPriceSource, WantedName
+from tradeup.adapters.skinport import SkinportItemQuote, SkinportPriceSource, WantedName
 from tradeup.config import Settings
 from tradeup.demo.runner import default_metadata_path
 from tradeup.domain.execution import CapabilityResult
@@ -38,7 +38,7 @@ from tradeup.domain.items import QualityType, Rarity
 from tradeup.domain.listings import ListingIdentity, MarketplaceListing
 from tradeup.domain.money import Money
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
-from tradeup.domain.valuation import PriceObservation, ValuationSource
+from tradeup.domain.valuation import AcquisitionReference, PriceObservation, ValuationSource
 from tradeup.execution.policy import RiskPolicy
 from tradeup.execution.reservations import ReservationRegistry
 from tradeup.metadata.bymykel import load_pinned_snapshot
@@ -126,6 +126,11 @@ class LiveScanResult:
     wanted_name_count: int
     collections_priced: tuple[str, ...]
     collections_skipped: tuple[str, ...]
+    #: Skinport name-level asks for targeted input names. Operator evidence only:
+    #: no floats, no listing IDs, no documented purchase endpoint. Empty for
+    #: broad scans, and empty with a stated detail when the fetch was refused.
+    acquisition_reference: tuple[AcquisitionReference, ...] = ()
+    acquisition_reference_detail: str = ""
 
     @property
     def approved_count(self) -> int:
@@ -134,6 +139,34 @@ class LiveScanResult:
     @property
     def rejected_count(self) -> int:
         return len(self.report.rejected)
+
+
+def _acquisition_references(
+    names: Sequence[str],
+    quotes: Mapping[str, SkinportItemQuote],
+    *,
+    venue: str,
+    moment: datetime,
+) -> tuple[AcquisitionReference, ...]:
+    """Name-level cross-market rows for exactly the targeted input names.
+
+    A name the venue does not quote still gets a row with zero quantity: "this
+    venue has none for sale" is evidence the operator needs, not an omission.
+    """
+    references: list[AcquisitionReference] = []
+    for name in dict.fromkeys(names):
+        quote = quotes.get(name)
+        references.append(
+            AcquisitionReference(
+                market_hash_name=name,
+                venue=venue,
+                min_ask=quote.min_price if quote else None,
+                median_ask=quote.median_price if quote else None,
+                quantity=quote.quantity if quote else 0,
+                observed_at=moment,
+            )
+        )
+    return tuple(references)
 
 
 def _wanted_output_names(
@@ -198,6 +231,8 @@ async def _gather_market_data(
     tuple[str, ...],
     tuple[str, ...],
     int,
+    tuple[AcquisitionReference, ...],
+    str,
     httpx.AsyncClient,
 ]:
     """Fetch live listings and price evidence. The caller owns the http client."""
@@ -327,6 +362,27 @@ async def _gather_market_data(
                 f" ({len(wanted) - _EXIT_ASK_NAME_LIMIT} names beyond the ask budget)"
             )
 
+    # Targeted confirmations also record the cross-market acquisition reference:
+    # Skinport's documented name-level asks for exactly the input names. Aggregate
+    # evidence for the operator, never pipeline input — and therefore a fetch
+    # refusal degrades the report instead of failing the scan.
+    references: tuple[AcquisitionReference, ...] = ()
+    references_detail = "not fetched (broad scan)"
+    if target_names:
+        quotes_result = await skinport.fetch_item_quotes(moment=now)
+        if quotes_result.ok:
+            references = _acquisition_references(
+                list(dict.fromkeys(target_names)),
+                quotes_result.unwrap(),
+                venue=skinport.venue,
+                moment=now,
+            )
+            references_detail = quotes_result.detail
+        else:
+            references_detail = (
+                f"unavailable: {quotes_result.status.value} ({quotes_result.detail})"
+            )
+
     return (
         listings_result,
         csfloat,
@@ -335,6 +391,8 @@ async def _gather_market_data(
         priced,
         skipped,
         len(wanted),
+        references,
+        references_detail,
         client,
     )
 
@@ -373,7 +431,17 @@ def run_live_scan(
     ruleset = DEFAULT_RULE_REGISTRY.resolve(now)
     fee_schedule = build_live_fee_schedule()
 
-    async def _run() -> tuple[ScanReport, str, str, tuple[str, ...], tuple[str, ...], int, int]:
+    async def _run() -> tuple[
+        ScanReport,
+        str,
+        str,
+        tuple[str, ...],
+        tuple[str, ...],
+        int,
+        int,
+        tuple[AcquisitionReference, ...],
+        str,
+    ]:
         (
             listings_result,
             csfloat,
@@ -382,6 +450,8 @@ def run_live_scan(
             priced,
             skipped,
             wanted_count,
+            references,
+            references_detail,
             client,
         ) = await _gather_market_data(
             settings,
@@ -436,6 +506,8 @@ def run_live_scan(
             skipped,
             wanted_count,
             len(observations),
+            references,
+            references_detail,
         )
 
     (
@@ -446,6 +518,8 @@ def run_live_scan(
         skipped,
         wanted_count,
         observation_count,
+        acquisition_reference,
+        acquisition_reference_detail,
     ) = asyncio.run(_run())
 
     partial_fill = PartialFillModel(base_currency=settings.base_currency)
@@ -491,7 +565,13 @@ def run_live_scan(
     artifacts: dict[str, Path] = {}
     artifacts["markdown"] = evidence_dir / f"live-scan-{stamp}.md"
     artifacts["markdown"].write_text(
-        render_scan_markdown(report, list(cards), title="LIVE shadow scan (read-only)"),
+        render_scan_markdown(
+            report,
+            list(cards),
+            title="LIVE shadow scan (read-only)",
+            acquisition_reference=acquisition_reference,
+            acquisition_reference_detail=acquisition_reference_detail,
+        ),
         encoding="utf-8",
     )
     artifacts["json"] = write_json(
@@ -526,6 +606,29 @@ def run_live_scan(
                 }
                 for o in report.rejected
             ],
+            "acquisition_reference": {
+                "note": (
+                    "Skinport name-level asks from the documented /v1/items aggregates: "
+                    "no floats, no listing IDs, and no documented purchase endpoint, so "
+                    "any cross-market purchase is a manual operator action and buy-side "
+                    "payment fees are UNVERIFIED. Reference only; never feeds EV or gates."
+                ),
+                "detail": acquisition_reference_detail,
+                "rows": [
+                    {
+                        "market_hash_name": ref.market_hash_name,
+                        "venue": ref.venue,
+                        "min_ask_minor": (
+                            ref.min_ask.minor_units if ref.min_ask is not None else None
+                        ),
+                        "median_ask_minor": (
+                            ref.median_ask.minor_units if ref.median_ask is not None else None
+                        ),
+                        "quantity": ref.quantity,
+                    }
+                    for ref in acquisition_reference
+                ],
+            },
             "economic_evidence": {
                 "orders_placed": 0,
                 "trade_ups_completed": 0,
@@ -545,4 +648,6 @@ def run_live_scan(
         wanted_name_count=wanted_count,
         collections_priced=priced,
         collections_skipped=skipped,
+        acquisition_reference=acquisition_reference,
+        acquisition_reference_detail=acquisition_reference_detail,
     )

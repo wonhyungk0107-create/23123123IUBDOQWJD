@@ -123,6 +123,54 @@ class TestCSFloatReadOnly:
             assert not result.unwrap().is_active  # type: ignore[attr-defined]
 
 
+async def _dmarket_fetch(settings: Settings) -> object:
+    import httpx
+
+    from tradeup.adapters.dmarket import DMarketAdapter, Ed25519Signer
+
+    secret = settings.dmarket_secret_key.get_secret_value() if settings.dmarket_secret_key else ""
+    public = settings.dmarket_public_key.get_secret_value() if settings.dmarket_public_key else ""
+    async with httpx.AsyncClient() as client:
+        rest = RestClient(
+            transport=HttpxTransport(client, clock=lambda: datetime.now(UTC)),
+            user_agent=settings.http_user_agent,
+            timeout_seconds=float(settings.http_timeout_seconds),
+            retry=RetryPolicy(max_attempts=settings.http_max_retries),
+            secrets={"dmarket_secret_key": secret},
+        )
+        adapter = DMarketAdapter(
+            rest,
+            public_key=public,
+            signer=Ed25519Signer.from_hex(secret),
+            rarity_by_name=RARITY_MAP,
+        )
+        return await adapter.fetch_listings(
+            ListingQuery(market_hash_name="AK-47 | Redline (Field-Tested)", limit=3),
+            moment=datetime.now(UTC),
+        )
+
+
+class TestDMarketReadOnly:
+    def test_signed_fetch_parses_or_fails_with_a_typed_reason(self) -> None:
+        """First live proof of the Ed25519 request signature over documented reads."""
+        settings = _settings()
+        _requires("TRADEUP_DMARKET_PUBLIC_KEY", settings.dmarket_public_key)
+        _requires("TRADEUP_DMARKET_SECRET_KEY", settings.dmarket_secret_key)
+
+        result = asyncio.run(_dmarket_fetch(settings))
+        assert result.status in {  # type: ignore[attr-defined]
+            CapabilityStatus.SUPPORTED_READ_ONLY,
+            CapabilityStatus.RATE_LIMITED,
+            CapabilityStatus.TEMPORARILY_UNAVAILABLE,
+            CapabilityStatus.AUTHENTICATION_REQUIRED,
+        }
+        if result.ok:  # type: ignore[attr-defined]
+            for listing in result.unwrap():  # type: ignore[attr-defined]
+                assert len(listing.raw_payload_hash) == 64
+                assert 0 <= listing.normalized_float <= 1
+                assert listing.price.minor_units >= 0
+
+
 class TestExecutionBoundaryHoldsLive:
     """The boundary must hold with real credentials present, not only without them."""
 

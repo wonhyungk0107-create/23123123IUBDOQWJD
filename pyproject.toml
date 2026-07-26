@@ -14,6 +14,8 @@ dependencies = [
     "httpx>=0.27",
     # Skinport's documented API mandates Accept-Encoding: br.
     "brotli>=1.1",
+    # DMarket's documented request signing is Ed25519 via NaCl (libsodium).
+    "pynacl>=1.5",
     "typer>=0.12",
     "polars>=1.0",
 ]

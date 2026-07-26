@@ -17,6 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from tradeup.domain.valuation import AcquisitionReference
 from tradeup.pipeline.scan import ScanReport
 from tradeup.reporting.operator_card import OperatorCard
 
@@ -246,7 +247,12 @@ def render_card_markdown(card: OperatorCard) -> str:
 
 
 def render_scan_markdown(
-    report: ScanReport, cards: Sequence[OperatorCard], *, title: str = "Shadow scan report"
+    report: ScanReport,
+    cards: Sequence[OperatorCard],
+    *,
+    title: str = "Shadow scan report",
+    acquisition_reference: Sequence[AcquisitionReference] = (),
+    acquisition_reference_detail: str = "",
 ) -> str:
     """Full scan report: ranked table, statistics, rejection census, then cards."""
     stats = report.statistics
@@ -299,6 +305,29 @@ def render_scan_markdown(
         )
     else:
         lines.append("No candidate was rejected.")
+
+    if acquisition_reference:
+        lines += [
+            "",
+            "## Cross-market acquisition reference",
+            "",
+            "Skinport name-level asks from the documented `/v1/items` aggregates: no",
+            "floats, no listing IDs, and no documented purchase endpoint, so buying",
+            "there is a manual operator action and buy-side payment fees are",
+            "UNVERIFIED. Reference only — these figures never feed EV or a gate.",
+            "",
+            "| Name | Venue | Min ask | Median ask | Quantity |",
+            "|---|---|---|---|---|",
+        ]
+        lines.extend(
+            f"| {ref.market_hash_name} | {ref.venue} | "
+            f"{ref.min_ask.as_major() if ref.min_ask is not None else 'none listed'} | "
+            f"{ref.median_ask.as_major() if ref.median_ask is not None else 'none listed'} | "
+            f"{ref.quantity} |"
+            for ref in acquisition_reference
+        )
+        if acquisition_reference_detail:
+            lines += ["", f"_Fetch detail: {acquisition_reference_detail}_"]
 
     lines += [
         "",

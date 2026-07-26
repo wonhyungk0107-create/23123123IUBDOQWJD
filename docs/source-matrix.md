@@ -231,6 +231,39 @@ The signature algorithm is **Ed25519** (NaCl), signed with the account's secret
 key. The key pair is generated in the API section of DMarket account settings
 (**SECONDARY**, from DMarket's own help centre and blog).
 
+**Signer implemented 2026-07-26** as `adapters.dmarket.Ed25519Signer` over
+PyNaCl (libsodium — the same NaCl the documentation names). It accepts the
+32-byte seed or the 64-byte seed‖public expanded form; the expanded form's
+embedded public half is cross-checked against the seed-derived key and a
+mismatch raises instead of producing signatures the venue would 401.
+Signing is pinned by RFC 8032 §7.1 published test vectors in
+`tests/contract/test_adapters.py` (external golden values, not
+implementation-derived). Read-only status is unchanged: purchase remains
+unimplemented while the endpoint-surface disagreement below stands.
+
+**Live verification, 2026-07-26 (measured against the venue):**
+
+- Signed `GET /trade-aggregator/v1/last-sales` → **200** with real sales rows,
+  and signed `GET /account/v1/user` → **200** returning the account whose
+  `publicKey` matches our `X-Api-Key`. The signature scheme, key pair and
+  header format are therefore **VERIFIED end-to-end**, not just against RFC
+  vectors.
+- `GET /exchange/v1/market/items` and `GET /exchange/v1/offers-by-title` both
+  answer **410 Gone** with the venue's own statement: *"This endpoint is
+  retired. Use /marketplace-api/v2/offers."* The Swagger still documents the
+  retired endpoints — the published reference is **stale**, which supersedes
+  the earlier Swagger-vs-dmarket-doc disagreement: both are out of date.
+- DMarket's 410 for retired routes is returned even for garbage signatures,
+  while a missing signature gets 401 — a 410 therefore says nothing about
+  auth. Distinguish them when debugging.
+- `GET /marketplace-api/v2/offers` (probed read-only): requires `gameId` and
+  `limit`, answers `{items, total, cursor}`; items carry
+  `attributes.cs2.{float, quality (QUALITY_* enum), collection (slug),
+  paintIndex, paintSeed}` — a different schema and different collection
+  identifiers from exchange/v1. Price, title and offer-id field names are
+  **UNCONFIRMED**; the adapter has NOT been migrated and its exact-listing
+  read currently fails typed and loud with the 410 detail.
+
 Two implementation hazards follow directly from the documented example and must
 be pinned by contract tests before any signed write:
 
@@ -736,8 +769,12 @@ integrate.
 ## 10. Skinport
 
 **Added 2026-07-26.** **Role.** Completed-sale price evidence for output
-valuation, and a sourced exit-fee venue. Never execution truth; the adapter
-produces `COMPLETED_SALE` observations only.
+valuation, a sourced exit-fee venue, and (since 2026-07-26) a **name-level
+acquisition reference** on targeted confirmations: `/v1/items` min/median asks
+and quantity for exactly the prospect's input names, rendered on the confirm
+report for the operator. Never execution truth; the adapter produces
+`COMPLETED_SALE` observations and aggregate `AcquisitionReference` rows only,
+and the reference never enters the optimizer, the EV engine or a gate.
 
 **Documentation.** <https://docs.skinport.com/> (**VERIFIED**, renders). The API
 is public and keyless. `GET /v1/items` and `GET /v1/sales/history` are
@@ -758,8 +795,20 @@ client-side and were confirmed through their published summaries. Encoded in
 `valuation/venue_fees.py` with that provenance; re-verify before any sale
 decision.
 
-**Purchase/execution operation.** None used and none will be: this integration
-is read-only price reference by design.
+**Purchase/execution operation.** None used and none exists to use. Verified
+against the rendered docs 2026-07-26: `GET /v1/items` returns aggregates per
+`market_hash_name` (`min_price`/`max_price`/`mean_price`/`median_price`,
+`quantity`, page URLs) with **no float values and no listing IDs**;
+`GET /v1/sales/history` is aggregated completed-sale statistics; the only
+authenticated endpoint found, `/v1/account/transactions` (Basic auth), is a
+**read-only** view of the account's own past transactions. No purchase/buy
+endpoint is documented anywhere in the API. Individual listings with floats
+exist only in the browser UI, which is outside the documented surface and
+therefore outside what this system may call. Consequences: Skinport cannot
+supply exact-asset inputs (no float → no `MarketplaceListing`), and a
+cross-market acquisition there is a manual operator action from the rendered
+reference. Buy-side payment/processing fees: **UNVERIFIED** — the reference
+displays gross asks and says so.
 
 **Unresolved questions.**
 
