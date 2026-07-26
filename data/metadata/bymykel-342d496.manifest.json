@@ -1,0 +1,27 @@
+{
+  "upstream_repo": "ByMykel/CSGO-API",
+  "upstream_path": "public/api/en/skins.json",
+  "upstream_commit": "342d49698a77ca5d2da69c4ecd236358c866a364",
+  "upstream_url": "https://raw.githubusercontent.com/ByMykel/CSGO-API/342d49698a77ca5d2da69c4ecd236358c866a364/public/api/en/skins.json",
+  "upstream_bytes": 5471848,
+  "upstream_sha256": "7aeb9582c5f3308be78c78d2fd3681e3c469c67c0aeeeb7a9e54adb5c3be32d7",
+  "upstream_entry_count": 2126,
+  "projection_file": "bymykel-342d496.json",
+  "projection_bytes": 374826,
+  "projection_sha256": "409522b7dab15838b115b173a2e353229d3e82f19c3a677a85a8c6868ae088d5",
+  "projection_entry_count": 1455,
+  "projected_fields": [
+    "id",
+    "name",
+    "rarity",
+    "collections",
+    "min_float",
+    "max_float",
+    "stattrak",
+    "souvenir",
+    "paint_index"
+  ],
+  "projected_at": "2026-07-26T03:14:51.967359+00:00",
+  "tool": "tools/project_bymykel.py",
+  "note": "Entries without a stated collection are dropped: they cannot participate in a trade-up contract."
+}

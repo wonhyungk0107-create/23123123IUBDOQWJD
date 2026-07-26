@@ -39,7 +39,7 @@ class TestResolution:
 
     def test_naive_timestamp_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="timezone-aware"):
-            DEFAULT_RULE_REGISTRY.resolve(datetime(2026, 7, 25))  # noqa: DTZ001
+            DEFAULT_RULE_REGISTRY.resolve(datetime(2026, 7, 25))
 
     def test_overlapping_rulesets_fail_closed_rather_than_picking_a_winner(self) -> None:
         overlapping = TradeupRuleSet(

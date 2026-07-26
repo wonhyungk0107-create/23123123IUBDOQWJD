@@ -12,15 +12,17 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Final
 
+from tradeup.domain._guards import reject_float
+
 __all__ = [
-    "Collection",
-    "FloatRange",
     "MAX_FLOAT",
     "MIN_FLOAT",
+    "WEAR_BOUNDS",
+    "Collection",
+    "FloatRange",
     "QualityType",
     "Rarity",
     "Skin",
-    "WEAR_BOUNDS",
     "WearCondition",
     "classify_wear",
 ]
@@ -122,8 +124,7 @@ def classify_wear(value: Decimal) -> WearCondition:
     Uses exact Decimal comparisons; a value sitting precisely on a boundary belongs
     to the *higher-wear* band, matching in-game behaviour (0.07 is Minimal Wear).
     """
-    if isinstance(value, float):
-        raise TypeError("classify_wear does not accept float; pass Decimal.")
+    reject_float(value, "classify_wear() argument")
     if not (MIN_FLOAT <= value <= MAX_FLOAT):
         raise ValueError(f"float value {value} outside [0, 1]")
     for condition, low, high in WEAR_BOUNDS:
@@ -147,12 +148,13 @@ class FloatRange:
 
     def __post_init__(self) -> None:
         for name, value in (("minimum", self.minimum), ("maximum", self.maximum)):
-            if isinstance(value, float):
-                raise TypeError(f"FloatRange.{name} must be Decimal, not float")
+            reject_float(value, f"FloatRange.{name}")
             if not (MIN_FLOAT <= value <= MAX_FLOAT):
                 raise ValueError(f"FloatRange.{name}={value} outside [0, 1]")
         if self.minimum >= self.maximum:
-            raise ValueError(f"FloatRange requires minimum < maximum, got {self.minimum}..{self.maximum}")
+            raise ValueError(
+                f"FloatRange requires minimum < maximum, got {self.minimum}..{self.maximum}"
+            )
 
     @property
     def width(self) -> Decimal:

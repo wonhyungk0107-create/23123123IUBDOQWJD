@@ -25,6 +25,7 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from fractions import Fraction
 from typing import Final
 
+from tradeup.domain._guards import reject_float
 from tradeup.domain.items import FloatRange, WearCondition, classify_wear
 from tradeup.domain.rules import (
     EligibleOutputPool,
@@ -74,8 +75,7 @@ def normalized_float_exact(raw_float: Decimal, float_range: FloatRange) -> Fract
     Raises when ``f_i`` lies outside ``[a_i, b_i]``: an out-of-range float means the
     listing and the metadata disagree about what the item is.
     """
-    if isinstance(raw_float, float):
-        raise TypeError("normalized_float does not accept float; pass Decimal.")
+    reject_float(raw_float, "raw_float")
     if not float_range.contains(raw_float):
         raise MathematicsError(
             f"raw float {raw_float} outside skin range "

@@ -34,9 +34,9 @@ __all__ = [
     "Currency",
     "CurrencyMismatchError",
     "FeeTreatment",
+    "MonetaryObservation",
     "Money",
     "MoneyError",
-    "MonetaryObservation",
     "SettlementStatus",
 ]
 
@@ -74,7 +74,7 @@ class Currency(enum.StrEnum):
 
     @property
     def scale(self) -> int:
-        return 10**self.exponent
+        return int(10**self.exponent)
 
 
 class BalanceType(enum.StrEnum):

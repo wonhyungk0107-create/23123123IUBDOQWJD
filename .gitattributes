@@ -1,0 +1,8 @@
+# Normalise to LF in the repository so diffs are identical across platforms and
+# fixture payload hashes stay stable regardless of checkout OS.
+* text=auto eol=lf
+
+# Golden fixtures and recorded API payloads are byte-compared. Never touch them.
+tests/fixtures/**   -text
+*.parquet           binary
+uv.lock             text eol=lf

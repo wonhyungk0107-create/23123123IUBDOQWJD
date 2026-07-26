@@ -131,7 +131,7 @@ class TestMonetaryObservation:
 
     def test_naive_timestamps_are_rejected(self) -> None:
         with pytest.raises(ValueError, match="timezone-aware"):
-            self._observation(datetime(2026, 7, 25, 12, 0, 0))  # noqa: DTZ001
+            self._observation(datetime(2026, 7, 25, 12, 0, 0))
 
     def test_age_and_staleness(self) -> None:
         observation = self._observation(NOW - timedelta(seconds=400))
