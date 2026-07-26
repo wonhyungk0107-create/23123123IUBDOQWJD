@@ -286,6 +286,7 @@ class TestCSFloatQueryAndPagination:
                     rarity=Rarity.MIL_SPEC,
                     quality=QualityType.NORMAL,
                     max_price=Money(50_000, Currency.USD),
+                    min_price=Money(500, Currency.USD),
                     limit=10,
                 ),
                 moment=NOW,
@@ -297,6 +298,7 @@ class TestCSFloatQueryAndPagination:
         assert sent["rarity"] == "3"
         assert sent["category"] == "1"
         assert sent["max_price"] == "50000"
+        assert sent["min_price"] == "500"
         assert sent["limit"] == "10"
 
     def test_cursor_pagination_follows_documented_pages(self) -> None:

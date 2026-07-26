@@ -36,6 +36,7 @@ from tradeup.demo.runner import default_metadata_path
 from tradeup.domain.execution import CapabilityResult
 from tradeup.domain.items import QualityType, Rarity
 from tradeup.domain.listings import ListingIdentity, MarketplaceListing
+from tradeup.domain.money import Money
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
 from tradeup.domain.valuation import PriceObservation
 from tradeup.execution.policy import RiskPolicy
@@ -180,6 +181,7 @@ async def _gather_market_data(
     input_rarity: Rarity,
     listing_limit: int,
     now: datetime,
+    price_band: tuple[Money | None, Money | None],
 ) -> tuple[
     CapabilityResult[Sequence[MarketplaceListing]],
     CSFloatAdapter,
@@ -212,8 +214,15 @@ async def _gather_market_data(
         rest, api_key=api_key, rarity_by_name=rarity_by_name, registry=registry
     )
 
+    min_price, max_price = price_band
     listings_result = await csfloat.fetch_listings(
-        ListingQuery(rarity=input_rarity, quality=QualityType.NORMAL, limit=listing_limit),
+        ListingQuery(
+            rarity=input_rarity,
+            quality=QualityType.NORMAL,
+            limit=listing_limit,
+            min_price=min_price,
+            max_price=max_price,
+        ),
         moment=now,
     )
     if not listings_result.ok:
@@ -251,6 +260,8 @@ def run_live_scan(
     input_rarity: Rarity = Rarity.MIL_SPEC,
     listing_limit: int = 150,
     max_candidates: int = 12,
+    min_price: Money | None = None,
+    max_price: Money | None = None,
     output_dir: Path | None = None,
 ) -> LiveScanResult:
     """One complete read-only shadow scan against the live market.
@@ -283,7 +294,9 @@ def run_live_scan(
             skipped,
             wanted_count,
             client,
-        ) = await _gather_market_data(settings, registry, input_rarity, listing_limit, now)
+        ) = await _gather_market_data(
+            settings, registry, input_rarity, listing_limit, now, (min_price, max_price)
+        )
         try:
             capital_model = CapitalModel(annual_rate=settings.annual_capital_cost_rate)
             exit_resolver = ExitPriceResolver(

@@ -149,6 +149,47 @@ class TestSuccess:
         assert "25 names beyond the 7-request budget" in result.detail
 
 
+class TestItemQuotes:
+    def test_parses_the_whole_catalogue_in_one_request(self) -> None:
+        rows = [
+            {
+                "market_hash_name": "AK | X (FT)",
+                "currency": "USD",
+                "min_price": 12.34,
+                "median_price": 15.0,
+                "quantity": 7,
+            },
+            {
+                "market_hash_name": "AK | Y (FN)",
+                "currency": "USD",
+                "min_price": None,
+                "median_price": None,
+                "quantity": 0,
+            },
+        ]
+        src, fixture = source(
+            {FixtureTransport.key("GET", f"{SKINPORT_BASE_URL}/items"): response(rows)}
+        )
+        result = asyncio.run(src.fetch_item_quotes(moment=NOW))
+        assert result.ok
+        quotes = result.unwrap()
+        assert len(fixture.calls) == 1
+        assert quotes["AK | X (FT)"].min_price is not None
+        assert quotes["AK | X (FT)"].min_price.minor_units == 1234  # Decimal, exact
+        assert quotes["AK | X (FT)"].quantity == 7
+        assert quotes["AK | Y (FN)"].min_price is None
+        assert "2 items quoted" in result.detail
+
+    def test_a_row_without_a_quantity_refuses(self) -> None:
+        row = {"market_hash_name": "AK | X (FT)", "currency": "USD", "min_price": 1.0}
+        src, _ = source(
+            {FixtureTransport.key("GET", f"{SKINPORT_BASE_URL}/items"): response([row])}
+        )
+        result = asyncio.run(src.fetch_item_quotes(moment=NOW))
+        assert not result.ok
+        assert "quantity" in result.detail
+
+
 class TestFailsClosed:
     def test_wrong_currency_refuses(self) -> None:
         row = sales_row("AK | X (FT)")
@@ -175,6 +216,15 @@ class TestFailsClosed:
         src, _ = source({FixtureTransport.key("GET", HISTORY_URL): response([], status=429)})
         result = fetch(src, wanted("AK | X (FT)"))
         assert result.status is CapabilityStatus.RATE_LIMITED
+
+    def test_items_wrong_currency_refuses(self) -> None:
+        row = {"market_hash_name": "AK | X (FT)", "currency": "EUR", "quantity": 3}
+        src, _ = source(
+            {FixtureTransport.key("GET", f"{SKINPORT_BASE_URL}/items"): response([row])}
+        )
+        result = asyncio.run(src.fetch_item_quotes(moment=NOW))
+        assert not result.ok
+        assert "USD was requested" in result.detail
 
     def test_brotli_header_is_requested(self) -> None:
         """The documented API mandates Accept-Encoding: br."""

@@ -324,6 +324,8 @@ class CSFloatAdapter(MarketAdapter):
             params["max_float"] = str(query.max_float)
         if query.max_price is not None:
             params["max_price"] = str(query.max_price.minor_units)
+        if query.min_price is not None:
+            params["min_price"] = str(query.min_price.minor_units)
         if query.rarity is not None:
             params["rarity"] = str(_RARITY_PARAM[query.rarity])
         if query.quality is not None:

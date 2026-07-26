@@ -12,7 +12,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -215,6 +215,114 @@ def candidates_scan(
     )
 
 
+@candidates_app.command("prospects")
+def candidates_prospects(
+    top: Annotated[int, typer.Option(help="How many ranked prospects to print.")] = 15,
+    output: Annotated[Path | None, typer.Option(help="Directory for artifacts.")] = None,
+) -> None:
+    """Catalog-wide trade-up prospect sweep from documented, keyless price data.
+
+    One Skinport /v1/items request prices the whole search space; every
+    (collection, rarity, quality, wear) contract sketch is evaluated with exact
+    probabilities and fee-net estimates over those asks. Prospects are LEADS for
+    the exact-listing scanner, never executable truth.
+    """
+    import httpx
+
+    from tradeup.adapters.http import HttpxTransport, RestClient, RetryPolicy
+    from tradeup.adapters.skinport import SkinportPriceSource
+    from tradeup.discovery.prospects import sweep_prospects
+    from tradeup.reporting.renderers import write_json
+    from tradeup.valuation.venue_fees import build_live_fee_schedule
+
+    settings = _settings()
+    _echo_boundary(settings)
+    typer.echo(
+        "REFERENCE-LEVEL sweep over Skinport asks. Estimates assume in-band input "
+        "floats and unconfirmed prices; nothing here is executable truth.\n"
+    )
+    now = _now()
+    registry = load_pinned_snapshot(default_metadata_path(), imported_at=now).registry
+    ruleset = DEFAULT_RULE_REGISTRY.resolve(now)
+
+    async def _fetch() -> Any:
+        async with httpx.AsyncClient() as client:
+            rest = RestClient(
+                transport=HttpxTransport(client, clock=lambda: datetime.now(UTC)),
+                user_agent=settings.http_user_agent,
+                timeout_seconds=float(settings.http_timeout_seconds),
+                retry=RetryPolicy(max_attempts=settings.http_max_retries),
+            )
+            return await SkinportPriceSource(rest).fetch_item_quotes(moment=now)
+
+    result = asyncio.run(_fetch())
+    if not result.ok:
+        typer.echo(f"sweep blocked: {result.status.value} ({result.detail})")
+        raise typer.Exit(1)
+    quotes = result.unwrap()
+    typer.echo(f"priced catalogue: {result.detail}")
+
+    prospects, statistics = sweep_prospects(
+        registry=registry,
+        ruleset=ruleset,
+        quotes=quotes,
+        fee_schedule=build_live_fee_schedule(),
+        base_currency=settings.base_currency,
+        moment=now,
+        max_cost=settings.max_contract_cost,
+    )
+
+    typer.echo("\nSWEEP CENSUS")
+    for key, value in statistics.summary().items():
+        typer.echo(f"  {key:<28} {value}")
+
+    typer.echo(f"\nTOP {min(top, len(prospects))} PROSPECTS (by estimated ROI)")
+    header = (
+        f"{'Collection':<38}{'Rarity':<12}{'Quality':<10}{'Wear':<16}"
+        f"{'Cost':>10}{'EV':>10}{'ROI':>9}"
+    )
+    typer.echo(header)
+    typer.echo("-" * len(header))
+    for prospect in prospects[:top]:
+        typer.echo(
+            f"{prospect.collection_name[:36]:<38}"
+            f"{prospect.input_rarity.value:<12}"
+            f"{prospect.quality.value:<10}"
+            f"{prospect.input_wear.value:<16}"
+            f"{prospect.estimated_cost.as_major()!s:>10}"
+            f"{prospect.estimated_ev.as_major()!s:>10}"
+            f"{str(prospect.roi_percent) + '%':>9}"
+        )
+
+    evidence_dir = output or settings.reports_dir
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    stamp = now.strftime("%Y%m%dT%H%M%SZ")
+    artifact = write_json(
+        evidence_dir / f"prospects-{stamp}.json",
+        {
+            "swept_at": now.isoformat(),
+            "data_nature": (
+                "REFERENCE ESTIMATES from Skinport asks; assumed in-band input floats; "
+                "not executable truth. Confirm with candidates scan-live."
+            ),
+            "rule_version": ruleset.rule_version,
+            "census": statistics.summary(),
+            "prospects": [p.to_dict() for p in prospects[:100]],
+        },
+    )
+    typer.echo(f"\nartifact   {artifact}")
+    if prospects:
+        best = prospects[0]
+        cheapest = min(plan.unit_price.minor_units for plan in best.inputs)
+        dearest = max(plan.unit_price.minor_units for plan in best.inputs)
+        typer.echo(
+            "\nConfirm the top prospect against exact listings, for example:\n"
+            f"  tradeup candidates scan-live --rarity {best.input_rarity.value} "
+            f"--min-price-minor {max(cheapest - 50, 1)} "
+            f"--max-price-minor {dearest + 100} --limit 120"
+        )
+
+
 @candidates_app.command("scan-live")
 def candidates_scan_live(
     rarity: Annotated[str, typer.Option(help="Input rarity to scan.")] = "MIL_SPEC",
@@ -222,10 +330,17 @@ def candidates_scan_live(
     max_candidates: Annotated[
         int, typer.Option(help="Cap on candidates; each revalidation costs API budget.")
     ] = 12,
+    min_price_minor: Annotated[
+        int | None, typer.Option(help="Only ingest listings at or above this price (cents).")
+    ] = None,
+    max_price_minor: Annotated[
+        int | None, typer.Option(help="Only ingest listings at or below this price (cents).")
+    ] = None,
     output: Annotated[Path | None, typer.Option(help="Directory for artifacts.")] = None,
     quiet: Annotated[bool, typer.Option(help="Only print the summary.")] = False,
 ) -> None:
     """Read-only shadow scan against the live market. Requires a CSFloat API key."""
+    from tradeup.domain.money import Money
     from tradeup.pipeline.live_scan import LiveScanError, run_live_scan
     from tradeup.reporting.renderers import render_card_console, render_ranked_table
 
@@ -242,6 +357,16 @@ def candidates_scan_live(
             input_rarity=Rarity(rarity),
             listing_limit=limit,
             max_candidates=max_candidates,
+            min_price=(
+                Money(min_price_minor, settings.base_currency)
+                if min_price_minor is not None
+                else None
+            ),
+            max_price=(
+                Money(max_price_minor, settings.base_currency)
+                if max_price_minor is not None
+                else None
+            ),
             output_dir=output,
         )
     except LiveScanError as exc:

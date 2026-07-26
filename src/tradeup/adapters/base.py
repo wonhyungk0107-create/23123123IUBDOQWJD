@@ -49,6 +49,7 @@ class ListingQuery:
     max_float: Decimal | None = None
     min_float: Decimal | None = None
     max_price: Money | None = None
+    min_price: Money | None = None
     limit: int = 100
 
     def __post_init__(self) -> None:

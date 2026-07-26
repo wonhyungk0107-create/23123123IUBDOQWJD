@@ -50,7 +50,7 @@ through the project venv's own launchers, and the exact commands are recorded in
 
 ## Tests
 
-**521 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
+**531 tests pass.** None requires the network. Hypothesis runs in `derandomize` mode.
 The opt-in live suite (`pytest -m live`) additionally passed 6/6 on 2026-07-26 with
 real credentials, and live shadow scans ran end to end — see Live checks.
 
@@ -64,7 +64,7 @@ real credentials, and live shadow scans ran end to end — see Live checks.
 
 ## Coverage
 
-Overall **85.6%** (floor 80%; the live-scan orchestration module is exercised by
+Overall **85.7%** (floor 80%; the live-scan orchestration module is exercised by
 the live runs rather than the mandatory suite). Money-critical modules, floor 90%:
 
 | Module | Branch coverage |
@@ -233,15 +233,36 @@ and CSFloat 429s the documented `limit=50` page size (measured ceiling: 40).
 10. **Docker has not been built here** — no Docker daemon in this environment. The
     `docker` CI job builds and runs it; that job has not yet executed.
 
+### Prospect sweep — 2026-07-26
+
+`tradeup candidates prospects` implements the TradeUpSpy-class discovery strategy
+on licit data (their site has no API and its robots.txt disallows the calculator
+paths, so nothing is scraped; the mathematics are public game rules this repo
+already implements). One documented, keyless Skinport `/v1/items` request priced
+**24,852 items**; the sweep evaluated **2,235** (collection, rarity, quality,
+wear) contract sketches and ranked **1,658 prospects**, with every skip counted
+(386 insufficient depth, 84 unpriceable outcomes, 183 rule/metadata, 107 over the
+cost cap). Top estimates after the 8% sale fee and a 12% ask haircut: Genesis
+StatTrak WW **+528%**, Chroma StatTrak FN **+161%** ($369.80 → $596.90 EV), and a
+band of cheap NORMAL industrial contracts at +40–175%. These are **reference
+estimates over asks with an assumed in-band input float — leads, not truth** —
+and the artifact says so on every row.
+
+A confirmation scan of the cheap-industrial band (120 exact listings, $0.01–0.60)
+still produced 10/10 `BELOW_DISCOVERY_ROI` (−70% to −97%): the optimizer builds
+the *cheapest* bundle per composition and the candidate cap truncates by
+enumeration order, so the promising collections were never actually examined,
+and the strongest prospects are StatTrak, which the live scan does not yet query.
+
 ## The single highest-value next task
 
-**Scan beyond the market floor.** The scanner works and measured its first zero,
-but `sort_by=lowest_price` over 120 listings only surveys the cheapest junk tier,
-where trade-ups are structurally unprofitable. The next iteration should search
-where the opportunity could actually live: per-collection targeted queries
-(`collection` + `min_price`/`max_price` bands around promising input tiers),
-scheduled across the measured 200-requests-per-window budget, accumulating
-rejection statistics across runs — the persistence layer already records every
-scan. Once candidates start passing discovery, the revalidation pass begins
-producing the listing-survival measurement that calibrates the bundle-completion
-prior, which remains the least-evidenced number in the model.
+**Close the prospect→confirmation gap.** Three concrete pieces: (1) StatTrak
+support in the live scan (the sweep's best leads are StatTrak; `category=2` is
+already a documented CSFloat filter); (2) per-prospect targeting — drive the scan
+from a chosen prospect's input names via the documented `market_hash_name`
+filter, instead of a global price band, so the exact collections the sweep
+flagged are the ones examined; (3) candidate selection by prospect promise
+rather than enumeration order. Once a sweep lead survives the exact-listing
+gates, revalidation starts producing the listing-survival measurement that
+calibrates the bundle-completion prior — still the least-evidenced number in the
+model.

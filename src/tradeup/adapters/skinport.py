@@ -19,6 +19,7 @@ composed from the registry -- names are composed and looked up, never parsed.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
@@ -34,7 +35,12 @@ from tradeup.domain.items import QualityType, WearCondition
 from tradeup.domain.money import BalanceType, Currency, Money
 from tradeup.domain.valuation import PriceObservation, ValuationSource
 
-__all__ = ["SKINPORT_BASE_URL", "SkinportPriceSource", "WantedName"]
+__all__ = [
+    "SKINPORT_BASE_URL",
+    "SkinportItemQuote",
+    "SkinportPriceSource",
+    "WantedName",
+]
 
 SKINPORT_BASE_URL = "https://api.skinport.com/v1"
 VENUE = "skinport"
@@ -52,6 +58,20 @@ _WINDOWS = ("last_7_days", "last_30_days")
 
 #: (skin_id, quality, wear) — the identity a name was composed from.
 WantedName = tuple[str, QualityType, WearCondition]
+
+
+@dataclass(frozen=True, slots=True)
+class SkinportItemQuote:
+    """Current-listing aggregates for one market hash name.
+
+    These are *asks* — nobody has paid them — so anything built on them is a
+    reference estimate, never execution truth.
+    """
+
+    market_hash_name: str
+    min_price: Money | None
+    median_price: Money | None
+    quantity: int
 
 
 class SkinportPriceSource:
@@ -133,7 +153,68 @@ class SkinportPriceSource:
             detail="; ".join(details),
         )
 
+    async def fetch_item_quotes(
+        self, *, moment: datetime
+    ) -> CapabilityResult[Mapping[str, SkinportItemQuote]]:
+        """The whole catalogue's current-listing aggregates, in one request.
+
+        ``GET /v1/items`` returns every item with ``min_price``/``median_price``/
+        ``quantity``. One request prices the entire search space for the prospect
+        sweep — this is the documented, keyless alternative to scraping anyone.
+        """
+        try:
+            response = await self._client.get(
+                f"{self._base_url}/items",
+                params={"app_id": "730", "currency": self._currency.value},
+                headers={"accept-encoding": "br"},
+            )
+            rows = response.json()
+            if not isinstance(rows, list):
+                raise TransportSchemaError("skinport items response is not a list")
+            quotes: dict[str, SkinportItemQuote] = {}
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    raise TransportSchemaError("skinport items row is not an object")
+                name = row.get("market_hash_name")
+                if not isinstance(name, str) or not name:
+                    raise TransportSchemaError("skinport items row has no market_hash_name")
+                currency = row.get("currency")
+                if currency != self._currency.value:
+                    raise TransportSchemaError(
+                        f"skinport returned {currency!r} prices; "
+                        f"{self._currency.value} was requested"
+                    )
+                quantity = row.get("quantity")
+                if not isinstance(quantity, int) or quantity < 0:
+                    raise TransportSchemaError(
+                        f"skinport quantity for {name!r} is not a non-negative int"
+                    )
+                quotes[name] = SkinportItemQuote(
+                    market_hash_name=name,
+                    min_price=self._optional_price(row.get("min_price"), name, "min_price"),
+                    median_price=self._optional_price(
+                        row.get("median_price"), name, "median_price"
+                    ),
+                    quantity=quantity,
+                )
+        except TransportError as exc:
+            return self._failure(moment, exc, operation="fetch_item_quotes")
+        return CapabilityResult.succeeded(
+            self.venue,
+            "fetch_item_quotes",
+            moment,
+            quotes,
+            detail=f"{len(quotes)} items quoted",
+        )
+
     # -- parsing --------------------------------------------------------------
+
+    def _optional_price(self, value: object, name: str, field: str) -> Money | None:
+        if value is None:
+            return None
+        if not isinstance(value, Decimal | int):
+            raise TransportSchemaError(f"skinport {field} for {name!r} is not numeric: {value!r}")
+        return Money.from_major(Decimal(value), self._currency, BalanceType.CASH_WITHDRAWABLE)
 
     def _parse_row(
         self,
@@ -190,9 +271,13 @@ class SkinportPriceSource:
             return None
         return name, observations
 
-    def _failure(
-        self, moment: datetime, exc: TransportError
-    ) -> CapabilityResult[tuple[PriceObservation, ...]]:
+    def _failure[T](
+        self,
+        moment: datetime,
+        exc: TransportError,
+        *,
+        operation: str = "fetch_sales_observations",
+    ) -> CapabilityResult[T]:
         status = CapabilityStatus.TEMPORARILY_UNAVAILABLE
         retry_after: int | None = None
         if isinstance(exc, TransportRateLimited):
@@ -200,11 +285,12 @@ class SkinportPriceSource:
             retry_after = exc.retry_after_seconds
         elif isinstance(exc, TransportAuthError):
             status = CapabilityStatus.AUTHENTICATION_REQUIRED
-        return CapabilityResult(
+        result: CapabilityResult[T] = CapabilityResult(
             status=status,
             venue=self.venue,
-            operation="fetch_sales_observations",
+            operation=operation,
             observed_at=moment,
             detail=str(exc) or type(exc).__name__,
             retry_after_seconds=retry_after,
         )
+        return result
