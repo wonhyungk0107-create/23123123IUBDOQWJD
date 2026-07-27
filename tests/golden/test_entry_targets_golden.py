@@ -15,17 +15,52 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from fractions import Fraction
 
+import pytest
+
 from tradeup.discovery.prospects import InputPlan, Prospect
+from tradeup.domain.fees import FeeOperation, FeeRule, FeeSchedule, UnknownFeeError
 from tradeup.domain.items import QualityType, Rarity, WearCondition
 from tradeup.domain.money import BalanceType, Currency, Money
-from tradeup.valuation.entry_targets import max_acquisition_cost, per_unit_entry_target
+from tradeup.valuation.entry_targets import (
+    max_acquisition_cost,
+    max_sticker_price,
+    per_unit_entry_target,
+)
 
 USD = Currency.USD
 CASH = BalanceType.CASH_WITHDRAWABLE
+MOMENT = datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC)
+_FEE_EPOCH = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def _usd(minor: int) -> Money:
     return Money(minor, USD, CASH)
+
+
+def _rule(
+    rule_id: str,
+    percentage: str,
+    *,
+    operation: FeeOperation = FeeOperation.PURCHASE,
+    fixed_minor: int = 0,
+    lower: int = 0,
+    upper: int | None = None,
+) -> FeeRule:
+    return FeeRule(
+        rule_id=rule_id,
+        venue="testvenue",
+        operation=operation,
+        balance_type=CASH,
+        currency=USD,
+        percentage=Decimal(percentage),
+        fixed_minor=fixed_minor,
+        effective_from=_FEE_EPOCH,
+        effective_until=None,
+        source="synthetic test rule -- NOT a real venue fee",
+        last_verified=None,
+        tier_lower_minor=lower,
+        tier_upper_minor=upper,
+    )
 
 
 def test_five_percent_floor_plain() -> None:
@@ -114,7 +149,108 @@ def test_prospect_entry_target_methods() -> None:
         outcome_count=3,
         unpriced_probability=Fraction(0),
         observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC),
+        ask_haircut=Decimal("0.12"),
     )
     assert prospect.input_count == 10
     assert prospect.entry_target_cost(Decimal("0.05")) == _usd(133)
     assert prospect.entry_target_unit_cost(Decimal("0.05")) == _usd(13)
+
+
+def test_sticker_flat_percentage() -> None:
+    # 2% purchase fee, cap $10.00 = 1000. Largest s with s + ceil(0.02 s) <= 1000:
+    #   s = 980: 980 + ceil(19.60) = 980 + 20 = 1000 <= 1000  -> fits.
+    #   s = 981: 981 + ceil(19.62) = 981 + 20 = 1001 > 1000   -> fails.
+    # Sticker target $9.80.
+    schedule = FeeSchedule([_rule("flat", "0.02")])
+    sticker = max_sticker_price(
+        unit_acquisition_cap=_usd(1000), venue="testvenue", fee_schedule=schedule, moment=MOMENT
+    )
+    assert sticker == _usd(980)
+
+
+def test_sticker_percentage_plus_fixed() -> None:
+    # 2% + $0.30 fixed, cap $10.00. s + ceil(0.02 s) + 30 <= 1000:
+    #   s = 950: 950 + ceil(19.00) + 30 = 950 + 19 + 30 = 999 <= 1000  -> fits.
+    #   s = 951: 951 + ceil(19.02) + 30 = 951 + 20 + 30 = 1001 > 1000  -> fails.
+    # Sticker target $9.50. (The ceiling makes the loaded cost jump by two
+    # minor units at 951, which is why 999 is the closest reachable total.)
+    schedule = FeeSchedule([_rule("flatfix", "0.02", fixed_minor=30)])
+    sticker = max_sticker_price(
+        unit_acquisition_cap=_usd(1000), venue="testvenue", fee_schedule=schedule, moment=MOMENT
+    )
+    assert sticker == _usd(950)
+
+
+def test_sticker_cross_tier_non_monotone() -> None:
+    # Two tiers: 5% below $5.00, 2% at and above it. Cap $5.20 = 520.
+    # Lower tier [1, 499]:  s = 495: 495 + ceil(24.75) = 495 + 25 = 520 -> fits;
+    #                       s = 496: 496 + ceil(24.80) = 521 -> fails. Tier best 495.
+    # Upper tier [500, ..]: s = 509: 509 + ceil(10.18) = 509 + 11 = 520 -> fits;
+    #                       s = 510: 510 + ceil(10.20) = 521 -> fails. Tier best 509.
+    # Affordability is non-monotone -- $4.96 fails while $5.00 fits
+    # (500 + ceil(10.00) = 510 <= 520) -- and the answer is the cross-tier
+    # maximum: $5.09.
+    schedule = FeeSchedule(
+        [
+            _rule("small", "0.05", upper=500),
+            _rule("large", "0.02", lower=500),
+        ]
+    )
+    sticker = max_sticker_price(
+        unit_acquisition_cap=_usd(520), venue="testvenue", fee_schedule=schedule, moment=MOMENT
+    )
+    assert sticker == _usd(509)
+
+
+def test_sticker_partial_coverage_uses_covered_range_only() -> None:
+    # Only stickers below $1.00 have a sourced fee (5%). Cap $50.00. The
+    # uncovered range above is not assumed cheap; the answer comes from the
+    # covered tier: s = 99: 99 + ceil(4.95) = 99 + 5 = 104 <= 5000. Target $0.99.
+    schedule = FeeSchedule([_rule("small-only", "0.05", upper=100)])
+    sticker = max_sticker_price(
+        unit_acquisition_cap=_usd(5000), venue="testvenue", fee_schedule=schedule, moment=MOMENT
+    )
+    assert sticker == _usd(99)
+
+
+def test_sticker_no_coverage_fails_closed() -> None:
+    # No purchase rule for the venue at all: affordability is unknowable, and
+    # unknowable must never read as "free". UnknownFeeError, not zero.
+    schedule = FeeSchedule([_rule("sale-only", "0.02", operation=FeeOperation.SALE)])
+    with pytest.raises(UnknownFeeError):
+        max_sticker_price(
+            unit_acquisition_cap=_usd(1000),
+            venue="testvenue",
+            fee_schedule=schedule,
+            moment=MOMENT,
+        )
+
+
+def test_sticker_multiple_operations_sum() -> None:
+    # Purchase 2% and deposit 1%, both quoted on the sticker. Cap $10.00:
+    #   s = 970: 970 + ceil(19.40) + ceil(9.70) = 970 + 20 + 10 = 1000 -> fits.
+    #   s = 971: 971 + ceil(19.42) + ceil(9.71) = 971 + 20 + 10 = 1001 -> fails.
+    # Sticker target $9.70.
+    schedule = FeeSchedule(
+        [
+            _rule("buy", "0.02"),
+            _rule("fund", "0.01", operation=FeeOperation.DEPOSIT),
+        ]
+    )
+    sticker = max_sticker_price(
+        unit_acquisition_cap=_usd(1000),
+        venue="testvenue",
+        fee_schedule=schedule,
+        moment=MOMENT,
+        operations=(FeeOperation.PURCHASE, FeeOperation.DEPOSIT),
+    )
+    assert sticker == _usd(970)
+
+
+def test_sticker_zero_cap_is_zero() -> None:
+    # Nothing positive fits under a zero cap regardless of the schedule.
+    schedule = FeeSchedule([_rule("flat2", "0.02")])
+    sticker = max_sticker_price(
+        unit_acquisition_cap=_usd(0), venue="testvenue", fee_schedule=schedule, moment=MOMENT
+    )
+    assert sticker.is_zero
