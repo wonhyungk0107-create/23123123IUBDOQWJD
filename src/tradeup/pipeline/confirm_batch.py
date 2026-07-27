@@ -19,8 +19,9 @@ import asyncio
 import json
 import time
 from collections.abc import Callable, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
@@ -68,15 +69,23 @@ def select_leads(
     *,
     top: int,
     min_estimated_roi: Decimal,
+    exclude: AbstractSet[tuple[str, str, str, str]] = frozenset(),
 ) -> tuple[Prospect, ...]:
     """Distinct leads worth spending confirmation budget on.
 
     The ranked board contains near-duplicates — a pure sketch and its filler
     dilutions share the same market reality — so leads deduplicate on
     (primary collection, rarity, quality, wear), keeping the best-ranked variant.
+
+    ``exclude`` rotates confirmation budget across the whole board: leads
+    confirmed recently are skipped so successive batches walk forward through
+    every above-floor lead instead of re-confirming the same top few forever.
+    If exclusion would leave nothing to confirm, it is ignored — fresh data on
+    the best leads beats an idle request budget.
     """
     seen: set[tuple[str, str, str, str]] = set()
     leads: list[Prospect] = []
+    skipped_recent = False
     for prospect in prospects:
         if prospect.estimated_roi < min_estimated_roi:
             continue
@@ -89,9 +98,14 @@ def select_leads(
         if key in seen:
             continue
         seen.add(key)
+        if key in exclude:
+            skipped_recent = True
+            continue
         leads.append(prospect)
         if len(leads) >= top:
             break
+    if not leads and skipped_recent:
+        return select_leads(prospects, top=top, min_estimated_roi=min_estimated_roi)
     return tuple(leads)
 
 
@@ -234,6 +248,7 @@ def run_confirmation_batch(
     clock: Callable[[], datetime],
     top: int = 5,
     min_estimated_roi: Decimal = Decimal("0"),
+    rotation_hours: int = 24,
     per_name_limit: int = 15,
     max_candidates: int = 5,
     qualities: Sequence[QualityType] = (QualityType.NORMAL, QualityType.STATTRAK),
@@ -289,7 +304,27 @@ def run_confirmation_batch(
         max_cost=settings.max_contract_cost,
     )
     del quotes
-    leads = select_leads(prospects, top=top, min_estimated_roi=min_estimated_roi)
+    # Rotate the confirmation budget forward through the whole above-floor
+    # board: skip leads confirmed within the rotation window so every possible
+    # trade-up gets exact-confirmed over successive batches, not just the top
+    # few forever. SQLite hands back naive timestamps; they are stored UTC.
+    recently_confirmed: set[tuple[str, str, str, str]] = set()
+    if rotation_hours > 0:
+        horizon = swept_at - timedelta(hours=rotation_hours)
+        for row in prior_rows:
+            row_confirmed_at = row.confirmed_at
+            if row_confirmed_at.tzinfo is None:
+                row_confirmed_at = row_confirmed_at.replace(tzinfo=UTC)
+            if row_confirmed_at >= horizon:
+                recently_confirmed.add(
+                    (row.collection_id, row.input_rarity, row.quality, row.input_wear)
+                )
+    leads = select_leads(
+        prospects,
+        top=top,
+        min_estimated_roi=min_estimated_roi,
+        exclude=recently_confirmed,
+    )
     if input_rarities is not None:
         allowed = set(input_rarities)
         leads = tuple(lead for lead in leads if lead.input_rarity in allowed)
