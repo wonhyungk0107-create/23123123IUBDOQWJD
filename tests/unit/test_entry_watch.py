@@ -33,6 +33,7 @@ from tradeup.pipeline.confirm_batch import (
     _load_standing_orders,
     _write_entry_alert,
     run_confirmation_batch,
+    select_leads,
 )
 from tradeup.valuation.entry_targets import assess_entry
 
@@ -251,6 +252,34 @@ def test_batch_feeds_calibration_back_and_stays_offline(settings_obj: Settings) 
     order_alert = result.order_alert_path.read_text(encoding="utf-8")
     assert "ORDER ALERT" in order_alert
     assert "Synthetic Skin (Well-Worn)" in order_alert
+
+
+def test_select_leads_rotates_past_recent_confirmations() -> None:
+    from dataclasses import replace
+
+    best = replace(_synthetic_prospect(), collection_id="col-a", estimated_roi=Decimal("0.9"))
+    runner_up = replace(_synthetic_prospect(), collection_id="col-b", estimated_roi=Decimal("0.8"))
+    recently = {("col-a", "MIL_SPEC", "STATTRAK", "WELL_WORN")}
+    picked = select_leads(
+        [best, runner_up], top=1, min_estimated_roi=Decimal("0"), exclude=recently
+    )
+    assert picked == (runner_up,)
+
+
+def test_select_leads_falls_back_when_the_whole_board_is_fresh() -> None:
+    from dataclasses import replace
+
+    best = replace(_synthetic_prospect(), collection_id="col-a", estimated_roi=Decimal("0.9"))
+    runner_up = replace(_synthetic_prospect(), collection_id="col-b", estimated_roi=Decimal("0.8"))
+    everything = {
+        ("col-a", "MIL_SPEC", "STATTRAK", "WELL_WORN"),
+        ("col-b", "MIL_SPEC", "STATTRAK", "WELL_WORN"),
+    }
+    picked = select_leads(
+        [best, runner_up], top=1, min_estimated_roi=Decimal("0"), exclude=everything
+    )
+    # Fresh data on the best lead beats an idle request budget.
+    assert picked == (best,)
 
 
 def test_malformed_standing_orders_fail_loudly(settings_obj: Settings) -> None:

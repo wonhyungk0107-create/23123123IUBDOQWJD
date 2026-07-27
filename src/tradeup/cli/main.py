@@ -367,6 +367,13 @@ def candidates_confirm_batch(
     min_roi: Annotated[
         str, typer.Option(help="Only confirm leads at or above this estimated ROI.")
     ] = "0",
+    rotation_hours: Annotated[
+        int,
+        typer.Option(
+            help="Skip leads confirmed within this many hours, rotating the "
+            "budget through the whole board. 0 disables rotation."
+        ),
+    ] = 24,
     per_name_limit: Annotated[
         int, typer.Option(help="Exact listings to fetch per input name.")
     ] = 15,
@@ -395,6 +402,7 @@ def candidates_confirm_batch(
             clock=_now,
             top=top,
             min_estimated_roi=Decimal(min_roi),
+            rotation_hours=rotation_hours,
             per_name_limit=per_name_limit,
             max_candidates=max_candidates,
             output_dir=output,
