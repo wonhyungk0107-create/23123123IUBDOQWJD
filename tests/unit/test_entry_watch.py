@@ -151,6 +151,12 @@ def test_alert_card_states_the_boundaries(settings_obj: Settings) -> None:
     assert "TU-abc123def456" in text
     assert "csfloat:1" in text
     assert "human-only" in text
+    # Standing buy-order block: name, quantity, the per-unit entry ceiling
+    # (cap 133 / 10 inputs = 13 minor = $0.13), and the WELL_WORN float band.
+    assert "Standing buy orders" in text
+    assert "`Synthetic Skin (Well-Worn)` x10: max price 0.13 USD" in text
+    assert "float 0.38-0.45" in text
+    assert "re-verify the buyer-side fee" in text
 
 
 def test_batch_feeds_calibration_back_and_stays_offline(settings_obj: Settings) -> None:

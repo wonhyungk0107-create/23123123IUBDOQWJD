@@ -39,7 +39,7 @@ from tradeup.discovery.calibration import (
 from tradeup.discovery.prospects import Prospect, ProspectPolicy, SweepStatistics, sweep_prospects
 from tradeup.domain.contracts import TradeupCandidate
 from tradeup.domain.execution import ExecutionResult
-from tradeup.domain.items import QualityType, Rarity
+from tradeup.domain.items import WEAR_BOUNDS, QualityType, Rarity
 from tradeup.domain.listings import MarketplaceListing
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
 from tradeup.execution.reservations import ReservationRegistry
@@ -443,6 +443,47 @@ def run_confirmation_batch(
     )
 
 
+def _buy_order_lines(outcome: ConfirmationOutcome) -> list[str]:
+    """Ready-to-enter standing buy-order parameters for this lead.
+
+    CSFloat executes buy orders venue-side, before public listing; *placing*
+    them is a one-time manual step because no placement API is documented.
+    The per-unit ceiling is the entry cap: if every fill lands at or below
+    it, the bundle total clears the ROI floor. Prices assume the adapter's
+    CSFloat fee model (buyer pays sticker; the seller pays the sale fee) —
+    re-verify at the venue before funding orders.
+    """
+    assessment = outcome.assessment
+    if assessment is None:
+        return []
+    prospect = outcome.prospect
+    band = next(
+        ((low, high) for wear, low, high in WEAR_BOUNDS if wear is prospect.input_wear),
+        None,
+    )
+    band_note = f", float {band[0]}-{band[1]}" if band is not None else ""
+    lines = [
+        "### Standing buy orders (venue-executed acquisition)",
+        "",
+        "Place once by hand on the venue; the venue then fills automatically",
+        "before public listing. Enter **at most** the ceiling below — fills at",
+        "any price up to it keep the bundle inside the entry cap:",
+        "",
+    ]
+    for plan in prospect.inputs:
+        lines.append(
+            f"- `{plan.market_hash_name}` x{plan.units}: "
+            f"max price {assessment.target_unit}{band_note}"
+        )
+    lines.append("")
+    lines.append("Fills accumulate as inventory (TARGET_ACCUMULATION); accept each trade")
+    lines.append("offer promptly. Expect fills anywhere in the float band — the estimate")
+    lines.append("assumed mid-band. Ceiling assumes buyer pays sticker only;")
+    lines.append("re-verify the buyer-side fee at the venue before funding orders.")
+    lines.append("")
+    return lines
+
+
 def _listing_line(listing: MarketplaceListing) -> str:
     """Listing summary plus a direct venue link where one is documented.
 
@@ -499,6 +540,8 @@ def _write_entry_alert(
         lines.append("- purchasable inputs at evaluation time:")
         lines.extend(f"    - {listing}" for listing in outcome.input_listings)
         lines.append("")
+        if assessment is not None:
+            lines.extend(_buy_order_lines(outcome))
     if executions:
         lines.append("## Automated execution attempt")
         lines.append("")
