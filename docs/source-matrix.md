@@ -309,6 +309,25 @@ and the GitHub repo as historical, but **confirm empirically against a live
 authenticated read endpoint before writing any execution code**, and pin the
 result in a contract test.
 
+**Re-checked 2026-07-26** while building the gated auto-buy engine
+(`purchasing/`): the discrepancy persists and has hardened rather than
+resolved. The Swagger spec (`docs.dmarket.com/v1/swagger.json`, **VERIFIED**
+fetches) still documents `PATCH /exchange/v1/offers-buy` on
+`api.dmarket.com` — but `/exchange/v1` *read* routes were measured returning
+**410** venue-side on 2026-07-26 with a migration notice pointing at
+`/marketplace-api/v2/offers`, so that spec is demonstrably stale for at least
+part of its surface; whether `offers-buy` survives is **UNVERIFIED**. The blog
+post "Important Changes to DMarket Trading API: A New Endpoint"
+(dmarket.com/blog/new-endpoint-on-dmarket/, June 27 2025, **VERIFIED**)
+migrates only `/price-aggregator/v1/aggregated-prices` →
+`/marketplace-api/v1/market-depth` and says nothing about purchase. The help
+centre article "Where to find the Trading API documentation" (article
+25266618997137) returns **HTTP 403** to us, as the crypto-fee articles do.
+Purchase therefore remains **unimplemented**; the auto-buy engine refuses with
+a typed result until the surface is pinned. Sanctioned resolution paths: a
+DMarket support ticket asking which reference is normative, or a venue
+announcement — never a speculative signed purchase with real funds.
+
 **Rate limits.** DMarket publishes limits in its FAQ (**SECONDARY** — read from
 `dmarket.com/faq`, which rendered, but this is a FAQ rather than the API
 reference):

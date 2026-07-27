@@ -126,6 +126,7 @@ def lead(
         outcome_count=2,
         unpriced_probability=Fraction(0),
         observed_at=NOW,
+        ask_haircut=Decimal("0.12"),
         counts_by_collection=((collection, 10),),
     )
 

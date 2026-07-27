@@ -12,9 +12,15 @@ The report gives the distribution of ``r`` and the implied haircuts, split by
 quality (StatTrak and Normal markets behave differently), and recommends the
 **median** implied haircut — with the even-count median taken from the *larger*
 haircut of the middle pair, because overstating a cost is the survivable error.
-Nothing here applies the recommendation: the operator does, explicitly, via
-``candidates prospects --ask-haircut``, and a recommendation below the minimum
-sample count is labelled unreliable rather than hidden.
+
+Application policy: a recommendation backed by at least
+:data:`MIN_RELIABLE_SAMPLES` pairs for its quality is applied automatically to
+the next sweep via :func:`applied_haircuts` — the batch feeds its own history
+back so estimates track measured reality without an operator in the loop. An
+unreliable recommendation steers nothing: below the sample floor the
+configured prior applies, and the report labels the anecdote as such. The
+operator can still override explicitly via ``candidates prospects
+--ask-haircut``.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ __all__ = [
     "CalibrationPair",
     "CalibrationReport",
     "QualityCalibration",
+    "applied_haircuts",
     "build_calibration_report",
 ]
 
@@ -139,6 +146,25 @@ def _calibrate(quality: QualityType, pairs: Sequence[CalibrationPair]) -> Qualit
         recommended_ask_haircut=_conservative_median(haircuts),
         reliable=len(pairs) >= MIN_RELIABLE_SAMPLES,
     )
+
+
+def applied_haircuts(
+    report: CalibrationReport,
+    *,
+    default: Decimal,
+) -> dict[QualityType, Decimal]:
+    """The ask haircut each quality's next sweep runs under.
+
+    A reliable per-quality recommendation (``>= MIN_RELIABLE_SAMPLES`` pairs)
+    is applied automatically; below the floor the configured ``default``
+    applies, because an anecdote must steer nothing. Every quality is present
+    in the result so callers never fall back implicitly.
+    """
+    applied = {quality: default for quality in QualityType}
+    for calibration in report.by_quality:
+        if calibration.reliable:
+            applied[calibration.quality] = calibration.recommended_ask_haircut
+    return applied
 
 
 def build_calibration_report(pairs: Sequence[CalibrationPair]) -> CalibrationReport:
