@@ -42,6 +42,7 @@ from tradeup.domain.mathematics import (
 from tradeup.domain.money import BalanceType, Currency, Money
 from tradeup.domain.rules import EligibleOutputPool, RuleViolation, TradeupRuleSet
 from tradeup.metadata.registry import MetadataRegistry
+from tradeup.valuation.entry_targets import Ratio, max_acquisition_cost, per_unit_entry_target
 from tradeup.valuation.expected_value import probability_weighted
 
 __all__ = ["InputPlan", "Prospect", "ProspectPolicy", "SweepStatistics", "sweep_prospects"]
@@ -123,6 +124,32 @@ class Prospect:
     @property
     def roi_percent(self) -> Decimal:
         return (self.estimated_roi * 100).quantize(Decimal("0.01"))
+
+    @property
+    def input_count(self) -> int:
+        return sum(plan.units for plan in self.inputs)
+
+    def entry_target_cost(self, target_roi: Ratio) -> Money:
+        """Largest total input spend at which this sketch clears ``target_roi``.
+
+        Inverts the same estimate that produced ``estimated_roi``, so it
+        inherits every prior in it: the ask haircut, the assumed wear point,
+        name-level asks. A threshold for spending confirmation budget, not an
+        executable price.
+        """
+        return max_acquisition_cost(
+            expected_net_output_value=self.estimated_output_value,
+            target_roi=target_roi,
+        )
+
+    def entry_target_unit_cost(self, target_roi: Ratio) -> Money:
+        """Per-unit share of :meth:`entry_target_cost`, rounded down.
+
+        The alerting comparison this feeds: when the *average* purchasable ask
+        over ``input_count`` units reaches this figure, the sketch is worth an
+        exact confirmation.
+        """
+        return per_unit_entry_target(self.entry_target_cost(target_roi), self.input_count)
 
     def summary_row(self) -> dict[str, str]:
         collection = self.collection_name

@@ -30,6 +30,7 @@ CRITICAL_MODULES = (
     "src/tradeup/optimizer/bundle.py",
     "src/tradeup/optimizer/pareto.py",
     "src/tradeup/valuation/capital.py",
+    "src/tradeup/valuation/entry_targets.py",
     "src/tradeup/valuation/exit_prices.py",
     "src/tradeup/valuation/expected_value.py",
     "src/tradeup/valuation/partial_fill.py",
