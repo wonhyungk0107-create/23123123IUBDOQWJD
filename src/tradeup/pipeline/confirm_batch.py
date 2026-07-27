@@ -37,13 +37,17 @@ from tradeup.discovery.calibration import (
     build_calibration_report,
 )
 from tradeup.discovery.prospects import Prospect, ProspectPolicy, SweepStatistics, sweep_prospects
+from tradeup.domain.contracts import TradeupCandidate
+from tradeup.domain.execution import ExecutionResult
 from tradeup.domain.items import QualityType, Rarity
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
+from tradeup.execution.reservations import ReservationRegistry
 from tradeup.metadata.bymykel import load_pinned_snapshot
 from tradeup.persistence.database import create_database
 from tradeup.persistence.models import ProspectConfirmationRow
 from tradeup.persistence.repositories import ConfirmationRepository
 from tradeup.pipeline.live_scan import LiveScanError, LiveScanResult, run_live_scan
+from tradeup.purchasing import AutoBuyer
 from tradeup.valuation.entry_targets import EntryAssessment, assess_entry
 from tradeup.valuation.venue_fees import build_live_fee_schedule
 
@@ -102,6 +106,8 @@ class ConfirmationOutcome:
     approved: bool = False
     #: Human-readable exact listings of the best bundle, for the alert card.
     input_listings: tuple[str, ...] = ()
+    #: The best candidate itself, so the execution engine can act on it.
+    candidate: TradeupCandidate | None = None
 
     def summary_row(self) -> dict[str, str]:
         exact = (
@@ -134,6 +140,9 @@ class BatchResult:
     applied_ask_haircuts: tuple[tuple[QualityType, Decimal], ...] = ()
     #: Operator card written when an approved candidate met the entry target.
     alert_path: Path | None = None
+    #: (candidate_id, result) for every automated-execution attempt, including
+    #: typed refusals — zero buys is a result and is reported as one.
+    executions: tuple[tuple[str, ExecutionResult], ...] = ()
 
 
 def _fetch_catalog_quotes(settings: Settings, now: datetime) -> dict[str, SkinportItemQuote]:
@@ -217,6 +226,7 @@ def run_confirmation_batch(
     output_dir: Path | None = None,
     quotes_fetcher: Callable[[Settings, datetime], dict[str, SkinportItemQuote]] | None = None,
     confirm: _Confirmer | None = None,
+    auto_buyer: AutoBuyer | None = None,
 ) -> BatchResult:
     """Sweep, confirm the distinct top leads, persist the pairs, report the fit.
 
@@ -296,6 +306,7 @@ def run_confirmation_batch(
         assessment: EntryAssessment | None = None
         approved = False
         input_listings: tuple[str, ...] = ()
+        best_candidate: TradeupCandidate | None = None
         if result is not None:
             listings_found = result.report.statistics.listings_ingested
             all_outcomes = result.report.all_outcomes
@@ -305,6 +316,7 @@ def run_confirmation_batch(
                     key=lambda o: (o.evaluation.roi_net, o.candidate.candidate_id),
                 )
                 candidate_id = best.candidate.candidate_id
+                best_candidate = best.candidate
                 evaluation = best.evaluation
                 exact_cost = evaluation.acquisition_cost.minor_units
                 exact_value = evaluation.expected_output_value.minor_units
@@ -345,6 +357,7 @@ def run_confirmation_batch(
                 assessment=assessment,
                 approved=approved,
                 input_listings=input_listings,
+                candidate=best_candidate,
             )
         )
 
@@ -389,8 +402,25 @@ def run_confirmation_batch(
         for outcome in outcomes
         if outcome.approved and outcome.assessment is not None and outcome.assessment.entry_met
     )
+
+    # Attempt automated execution on every entry hit. With no buyer configured
+    # (or live execution off) each attempt yields typed refusals, and those
+    # refusals are reported: zero buys is a result, never a silence.
+    executions: list[tuple[str, ExecutionResult]] = []
+    if entry_hits:
+        buyer = auto_buyer or AutoBuyer(
+            settings=settings, adapters={}, reservations=ReservationRegistry()
+        )
+        for hit in entry_hits:
+            if hit.candidate is None:
+                continue
+            attempt = asyncio.run(buyer.execute_candidate(hit.candidate, moment=recorded_at))
+            executions.extend((hit.candidate.candidate_id, result) for result in attempt)
+
     alert_path = (
-        _write_entry_alert(entry_hits, settings=settings, moment=recorded_at)
+        _write_entry_alert(
+            entry_hits, executions=tuple(executions), settings=settings, moment=recorded_at
+        )
         if entry_hits
         else None
     )
@@ -405,12 +435,14 @@ def run_confirmation_batch(
         history_rows=len(history),
         applied_ask_haircuts=policy.ask_haircut_by_quality,
         alert_path=alert_path,
+        executions=tuple(executions),
     )
 
 
 def _write_entry_alert(
     hits: Sequence[ConfirmationOutcome],
     *,
+    executions: tuple[tuple[str, ExecutionResult], ...] = (),
     settings: Settings,
     moment: datetime,
 ) -> Path:
@@ -452,6 +484,15 @@ def _write_entry_alert(
             )
         lines.append("- purchasable inputs at evaluation time:")
         lines.extend(f"    - {listing}" for listing in outcome.input_listings)
+        lines.append("")
+    if executions:
+        lines.append("## Automated execution attempt")
+        lines.append("")
+        for candidate_id, execution in executions:
+            lines.append(
+                f"- `{candidate_id}` intent `{execution.intent_id}`: "
+                f"{execution.status.value} -- {execution.detail}"
+            )
         lines.append("")
     lines.append("Listings move. Re-confirm (`tradeup candidates confirm --rank 1`) before")
     lines.append("acting; this alert is a measurement, not an instruction to spend.")

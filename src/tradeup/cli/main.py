@@ -449,11 +449,19 @@ def candidates_confirm_batch(
                 f"(unit cap {assessment.target_unit.as_major()}) -> {state}"
             )
 
+    if result.executions:
+        typer.echo("\nAUTOMATED EXECUTION")
+        for candidate_id, execution in result.executions:
+            typer.echo(
+                f"  {candidate_id} {execution.intent_id}: {execution.status.value}"
+                f"  {execution.detail}"
+            )
+
     if result.alert_path is not None:
         typer.echo("\n" + "!" * 62)
         typer.echo("ENTRY ALERT: approved candidate(s) at or below the entry target.")
         typer.echo(f"Operator card: {result.alert_path}")
-        typer.echo("Acquisition is human-only; nothing was bought.")
+        typer.echo("Acquisition remains gated; see the execution lines above.")
         typer.echo("!" * 62)
 
     _echo_calibration(result.calibration, result.history_rows)
