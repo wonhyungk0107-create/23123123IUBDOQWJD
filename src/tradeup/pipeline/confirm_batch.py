@@ -18,10 +18,11 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Protocol
 
 import httpx
 
@@ -32,6 +33,7 @@ from tradeup.demo.runner import default_metadata_path
 from tradeup.discovery.calibration import (
     CalibrationPair,
     CalibrationReport,
+    applied_haircuts,
     build_calibration_report,
 )
 from tradeup.discovery.prospects import Prospect, ProspectPolicy, SweepStatistics, sweep_prospects
@@ -42,6 +44,7 @@ from tradeup.persistence.database import create_database
 from tradeup.persistence.models import ProspectConfirmationRow
 from tradeup.persistence.repositories import ConfirmationRepository
 from tradeup.pipeline.live_scan import LiveScanError, LiveScanResult, run_live_scan
+from tradeup.valuation.entry_targets import EntryAssessment, assess_entry
 from tradeup.valuation.venue_fees import build_live_fee_schedule
 
 __all__ = ["BatchResult", "ConfirmationOutcome", "run_confirmation_batch", "select_leads"]
@@ -93,6 +96,12 @@ class ConfirmationOutcome:
     exact_roi: Decimal | None
     rejection_reasons: str | None
     detail: str | None
+    #: Entry-threshold judgement for the best candidate, when one was built.
+    assessment: EntryAssessment | None = None
+    #: True when the best candidate cleared every gate — the alert condition.
+    approved: bool = False
+    #: Human-readable exact listings of the best bundle, for the alert card.
+    input_listings: tuple[str, ...] = ()
 
     def summary_row(self) -> dict[str, str]:
         exact = (
@@ -121,6 +130,10 @@ class BatchResult:
     outcomes: tuple[ConfirmationOutcome, ...]
     calibration: CalibrationReport
     history_rows: int
+    #: The per-quality haircuts this batch's sweep actually ran under.
+    applied_ask_haircuts: tuple[tuple[QualityType, Decimal], ...] = ()
+    #: Operator card written when an approved candidate met the entry target.
+    alert_path: Path | None = None
 
 
 def _fetch_catalog_quotes(settings: Settings, now: datetime) -> dict[str, SkinportItemQuote]:
@@ -173,6 +186,21 @@ def _confirm_one(
     return "CONFIRMED", result, None
 
 
+class _Confirmer(Protocol):
+    """The exact-listing confirmation step, injectable so tests stay offline."""
+
+    def __call__(
+        self,
+        prospect: Prospect,
+        *,
+        settings: Settings,
+        now: datetime,
+        per_name_limit: int,
+        max_candidates: int,
+        output_dir: Path | None,
+    ) -> tuple[str, LiveScanResult | None, str | None]: ...
+
+
 def run_confirmation_batch(
     *,
     settings: Settings,
@@ -187,14 +215,39 @@ def run_confirmation_batch(
     retry_wait_seconds: int = 310,
     sleeper: Callable[[float], None] = time.sleep,
     output_dir: Path | None = None,
+    quotes_fetcher: Callable[[Settings, datetime], dict[str, SkinportItemQuote]] | None = None,
+    confirm: _Confirmer | None = None,
 ) -> BatchResult:
-    """Sweep, confirm the distinct top leads, persist the pairs, report the fit."""
+    """Sweep, confirm the distinct top leads, persist the pairs, report the fit.
+
+    The loop is closed: reliable per-quality haircut recommendations from the
+    recorded history steer this batch's sweep automatically, and an approved
+    candidate at or below the entry target produces an alert artifact. Nothing
+    here can spend; acquisition remains a human following the operator card.
+    """
     policy = policy or ProspectPolicy()
+    fetch_quotes = quotes_fetcher if quotes_fetcher is not None else _fetch_catalog_quotes
+    confirm_lead: _Confirmer = confirm if confirm is not None else _confirm_one
     swept_at = clock()
+
+    # Feed the recorded history back into the sweep: a reliable per-quality
+    # recommendation is applied; an anecdote or empty history leaves the
+    # configured prior in place.
+    database = create_database(settings.database_url)
+    database.create_all()
+    with database.session() as session:
+        prior_rows = ConfirmationRepository(session).all_rows()
+    prior_calibration = build_calibration_report(calibration_pairs(prior_rows))
+    haircuts = applied_haircuts(prior_calibration, default=policy.ask_haircut)
+    policy = replace(
+        policy,
+        ask_haircut_by_quality=tuple(sorted(haircuts.items(), key=lambda pair: pair[0].value)),
+    )
+
     registry = load_pinned_snapshot(default_metadata_path(), imported_at=swept_at).registry
     registry.require_valid()
     ruleset = DEFAULT_RULE_REGISTRY.resolve(swept_at)
-    quotes = _fetch_catalog_quotes(settings, swept_at)
+    quotes = fetch_quotes(settings, swept_at)
 
     prospects, statistics = sweep_prospects(
         registry=registry,
@@ -215,7 +268,7 @@ def run_confirmation_batch(
 
     outcomes: list[ConfirmationOutcome] = []
     for lead in leads:
-        status, result, failure = _confirm_one(
+        status, result, failure = confirm_lead(
             lead,
             settings=settings,
             now=clock(),
@@ -226,7 +279,7 @@ def run_confirmation_batch(
         if status == "FAILED" and failure is not None and "RATE_LIMITED" in failure:
             # One respectful wait for the documented window, then one retry.
             sleeper(float(retry_wait_seconds))
-            status, result, failure = _confirm_one(
+            status, result, failure = confirm_lead(
                 lead,
                 settings=settings,
                 now=clock(),
@@ -240,6 +293,9 @@ def run_confirmation_batch(
         exact_roi: Decimal | None = None
         reasons: str | None = None
         listings_found = 0
+        assessment: EntryAssessment | None = None
+        approved = False
+        input_listings: tuple[str, ...] = ()
         if result is not None:
             listings_found = result.report.statistics.listings_ingested
             all_outcomes = result.report.all_outcomes
@@ -249,12 +305,30 @@ def run_confirmation_batch(
                     key=lambda o: (o.evaluation.roi_net, o.candidate.candidate_id),
                 )
                 candidate_id = best.candidate.candidate_id
-                exact_cost = best.evaluation.acquisition_cost.minor_units
-                exact_value = best.evaluation.expected_output_value.minor_units
-                exact_ev = best.evaluation.ev_net.minor_units
-                exact_roi = best.evaluation.roi_net
+                evaluation = best.evaluation
+                exact_cost = evaluation.acquisition_cost.minor_units
+                exact_value = evaluation.expected_output_value.minor_units
+                exact_ev = evaluation.ev_net.minor_units
+                exact_roi = evaluation.roi_net
+                approved = best.approved
+                input_listings = tuple(str(item.listing) for item in best.candidate.inputs)
                 if best.rejection is not None:
                     reasons = ",".join(r.value for r in best.rejection.reasons)
+                if evaluation.acquisition_cost.minor_units >= 1:
+                    # Overheads held at their evaluated magnitudes: pessimistic
+                    # for any cheaper bundle, per assess_entry's contract.
+                    assessment = assess_entry(
+                        expected_net_output_value=evaluation.expected_output_value,
+                        observed_acquisition_cost=evaluation.acquisition_cost,
+                        input_count=best.candidate.input_count,
+                        target_roi=settings.final_min_net_roi,
+                        fixed_overhead=(
+                            evaluation.operational_cost
+                            + evaluation.settlement_cost
+                            + evaluation.capital_carry_cost
+                            + evaluation.partial_fill_reserve
+                        ),
+                    )
 
         outcomes.append(
             ConfirmationOutcome(
@@ -268,13 +342,14 @@ def run_confirmation_batch(
                 exact_roi=exact_roi,
                 rejection_reasons=reasons,
                 detail=failure,
+                assessment=assessment,
+                approved=approved,
+                input_listings=input_listings,
             )
         )
 
     # Persist every outcome, then calibrate over the full recorded history.
     recorded_at = clock()
-    database = create_database(settings.database_url)
-    database.create_all()
     with database.session() as session:
         repository = ConfirmationRepository(session)
         for outcome in outcomes:
@@ -292,7 +367,9 @@ def run_confirmation_batch(
                     estimated_output_value_minor=prospect.estimated_output_value.minor_units,
                     estimated_ev_minor=prospect.estimated_ev.minor_units,
                     estimated_roi=str(prospect.estimated_roi),
-                    estimated_ask_haircut=str(policy.ask_haircut),
+                    # The haircut this estimate actually ran under -- with
+                    # per-quality calibration these differ by lead.
+                    estimated_ask_haircut=str(prospect.ask_haircut),
                     status=outcome.status,
                     listings_found=outcome.listings_found,
                     candidate_id=outcome.candidate_id,
@@ -307,6 +384,17 @@ def run_confirmation_batch(
         history = repository.all_rows()
     database.dispose()
 
+    entry_hits = tuple(
+        outcome
+        for outcome in outcomes
+        if outcome.approved and outcome.assessment is not None and outcome.assessment.entry_met
+    )
+    alert_path = (
+        _write_entry_alert(entry_hits, settings=settings, moment=recorded_at)
+        if entry_hits
+        else None
+    )
+
     calibration = build_calibration_report(calibration_pairs(history))
     return BatchResult(
         swept_at=swept_at,
@@ -315,7 +403,60 @@ def run_confirmation_batch(
         outcomes=tuple(outcomes),
         calibration=calibration,
         history_rows=len(history),
+        applied_ask_haircuts=policy.ask_haircut_by_quality,
+        alert_path=alert_path,
     )
+
+
+def _write_entry_alert(
+    hits: Sequence[ConfirmationOutcome],
+    *,
+    settings: Settings,
+    moment: datetime,
+) -> Path:
+    """Write the operator card for approved candidates at the entry target.
+
+    The card is evidence of a moment, not a standing offer: it states what was
+    measured, when, and that nothing was bought. Acquisition stays human.
+    """
+    alert_dir = settings.artifacts_dir / "alerts"
+    alert_dir.mkdir(parents=True, exist_ok=True)
+    path = alert_dir / f"entry-alert-{moment.strftime('%Y%m%dT%H%M%SZ')}.md"
+    lines = [
+        "# ENTRY ALERT -- approved trade-up candidate at the entry target",
+        "",
+        f"Generated {moment.isoformat()} by the confirm batch.",
+        "Live read-only measurement of purchasable listings; **nothing was bought**.",
+        "Acquisition is human-only. Verify every price and fee at the venue before",
+        "paying: sourced fees have not been confirmed against an account screen.",
+        "",
+    ]
+    for outcome in hits:
+        prospect = outcome.prospect
+        assessment = outcome.assessment
+        roi = (
+            f"{(outcome.exact_roi * 100).quantize(Decimal('0.01'))}%"
+            if outcome.exact_roi is not None
+            else "unknown"
+        )
+        lines.append(
+            f"## {prospect.collection_name} -- {prospect.quality.value} {prospect.input_wear.value}"
+        )
+        lines.append("")
+        lines.append(f"- candidate: `{outcome.candidate_id}`")
+        lines.append(f"- exact fee-net ROI at evaluation: {roi}")
+        if assessment is not None:
+            lines.append(
+                f"- bundle acquisition {assessment.observed_total} at or below entry cap "
+                f"{assessment.target_total} (per-unit cap {assessment.target_unit})"
+            )
+        lines.append("- purchasable inputs at evaluation time:")
+        lines.extend(f"    - {listing}" for listing in outcome.input_listings)
+        lines.append("")
+    lines.append("Listings move. Re-confirm (`tradeup candidates confirm --rank 1`) before")
+    lines.append("acting; this alert is a measurement, not an instruction to spend.")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
 def calibration_pairs(rows: Sequence[ProspectConfirmationRow]) -> tuple[CalibrationPair, ...]:

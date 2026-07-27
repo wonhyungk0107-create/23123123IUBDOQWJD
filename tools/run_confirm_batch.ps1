@@ -23,4 +23,11 @@ $output = & (Join-Path $repo ".venv\Scripts\tradeup.exe") candidates confirm-bat
 $code = $LASTEXITCODE
 $output | Add-Content -Path $log -Encoding utf8
 "=== $(Get-Date -Format o) confirm-batch exit $code ===" | Add-Content -Path $log -Encoding utf8
+
+# Best-effort desktop nudge when the batch found an approved entry. The
+# operator card path is in the log either way; msg.exe failing is harmless.
+if ($output | Where-Object { $_ -match "ENTRY ALERT" }) {
+    try { msg.exe $env:USERNAME "CS2 trade-up ENTRY ALERT - operator card in $log" } catch {}
+}
+
 exit $code

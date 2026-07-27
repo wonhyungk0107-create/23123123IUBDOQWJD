@@ -421,6 +421,41 @@ def candidates_confirm_batch(
             f"{row['est_roi']:>10}{row['exact_roi']:>11}  {row['status']:<12}{row['reasons']}"
         )
 
+    if result.applied_ask_haircuts:
+        applied = ", ".join(
+            f"{quality.value}={haircut}" for quality, haircut in result.applied_ask_haircuts
+        )
+        typer.echo(f"\nSweep ask haircuts applied (calibrated where reliable): {applied}")
+
+    entry_rows = [outcome for outcome in result.outcomes if outcome.assessment is not None]
+    if entry_rows:
+        typer.echo(f"\nENTRY TARGETS (final ROI floor {settings.final_min_net_roi})")
+        for outcome in entry_rows:
+            assessment = outcome.assessment
+            if assessment is None:
+                continue
+            label = (
+                f"{outcome.prospect.collection_name} {outcome.prospect.quality.value} "
+                f"{outcome.prospect.input_wear.value}"
+            )
+            state = (
+                "ENTRY MET"
+                if assessment.entry_met
+                else f"short by {assessment.shortfall.as_major()}"
+            )
+            typer.echo(
+                f"  {label}: bundle {assessment.observed_total.as_major()} vs cap "
+                f"{assessment.target_total.as_major()} "
+                f"(unit cap {assessment.target_unit.as_major()}) -> {state}"
+            )
+
+    if result.alert_path is not None:
+        typer.echo("\n" + "!" * 62)
+        typer.echo("ENTRY ALERT: approved candidate(s) at or below the entry target.")
+        typer.echo(f"Operator card: {result.alert_path}")
+        typer.echo("Acquisition is human-only; nothing was bought.")
+        typer.echo("!" * 62)
+
     _echo_calibration(result.calibration, result.history_rows)
     typer.echo("\nNothing was bought; every confirmation is a read-only measurement.")
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from fractions import Fraction
@@ -33,7 +34,14 @@ from fractions import Fraction
 from tradeup.domain.fees import FeeOperation, FeeRule, FeeSchedule, UnknownFeeError
 from tradeup.domain.money import BalanceType, Currency, Money
 
-__all__ = ["Ratio", "max_acquisition_cost", "max_sticker_price", "per_unit_entry_target"]
+__all__ = [
+    "EntryAssessment",
+    "Ratio",
+    "assess_entry",
+    "max_acquisition_cost",
+    "max_sticker_price",
+    "per_unit_entry_target",
+]
 
 #: Exact ratio inputs. ``float`` is rejected at runtime, as everywhere on the
 #: money path.
@@ -269,3 +277,65 @@ def max_sticker_price(
             "refusing to treat unknown fees as unaffordable"
         )
     return Money(best, cap.currency, cap.balance_type)
+
+
+@dataclass(frozen=True, slots=True)
+class EntryAssessment:
+    """Where a confirmed bundle sits relative to the entry threshold.
+
+    ``entry_met`` is exact: the observed spend is at or below the largest
+    spend that clears ``target_roi`` under the stated overheads. ``shortfall``
+    is how much cheaper the whole bundle must get before entry is met — zero
+    when it already is. All amounts share the observation's currency and
+    balance type.
+    """
+
+    target_roi: Fraction
+    target_total: Money
+    target_unit: Money
+    observed_total: Money
+    input_count: int
+    entry_met: bool
+    shortfall: Money
+
+
+def assess_entry(
+    *,
+    expected_net_output_value: Money,
+    observed_acquisition_cost: Money,
+    input_count: int,
+    target_roi: Ratio,
+    fixed_overhead: Money | None = None,
+) -> EntryAssessment:
+    """Judge a confirmed bundle against the entry threshold.
+
+    ``fixed_overhead`` carries the charges beyond acquisition (operational
+    cost, settlement share, capital carry, partial-fill reserve) *at their
+    evaluated magnitudes*. Holding spend-dependent charges fixed at the level
+    evaluated for the observed bundle overstates them for any cheaper bundle,
+    so the resulting target errs low — the pessimistic direction for a
+    spending threshold.
+
+    A bundle with a non-positive observed cost is a data fault, not a bargain.
+    """
+    if observed_acquisition_cost.minor_units < 1:
+        raise ValueError(
+            f"observed acquisition cost must be positive, got {observed_acquisition_cost}"
+        )
+    target_total = max_acquisition_cost(
+        expected_net_output_value=expected_net_output_value,
+        target_roi=target_roi,
+        fixed_overhead=fixed_overhead,
+    )
+    shortfall = observed_acquisition_cost - target_total
+    if shortfall.is_negative:
+        shortfall = Money.zero(shortfall.currency, shortfall.balance_type)
+    return EntryAssessment(
+        target_roi=_as_fraction(target_roi, "target_roi"),
+        target_total=target_total,
+        target_unit=per_unit_entry_target(target_total, input_count),
+        observed_total=observed_acquisition_cost,
+        input_count=input_count,
+        entry_met=observed_acquisition_cost <= target_total,
+        shortfall=shortfall,
+    )

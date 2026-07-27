@@ -149,6 +149,7 @@ def test_prospect_entry_target_methods() -> None:
         outcome_count=3,
         unpriced_probability=Fraction(0),
         observed_at=datetime(2026, 7, 25, 12, 0, 0, tzinfo=UTC),
+        ask_haircut=Decimal("0.12"),
     )
     assert prospect.input_count == 10
     assert prospect.entry_target_cost(Decimal("0.05")) == _usd(133)
