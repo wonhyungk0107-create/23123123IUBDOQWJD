@@ -16,6 +16,7 @@ on. Nothing is silently skipped.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -36,11 +37,17 @@ from tradeup.discovery.calibration import (
     applied_haircuts,
     build_calibration_report,
 )
+from tradeup.discovery.order_watch import (
+    OrderVerdict,
+    StandingOrder,
+    review_standing_orders,
+)
 from tradeup.discovery.prospects import Prospect, ProspectPolicy, SweepStatistics, sweep_prospects
 from tradeup.domain.contracts import TradeupCandidate
 from tradeup.domain.execution import ExecutionResult
-from tradeup.domain.items import WEAR_BOUNDS, QualityType, Rarity
+from tradeup.domain.items import WEAR_BOUNDS, QualityType, Rarity, WearCondition
 from tradeup.domain.listings import MarketplaceListing
+from tradeup.domain.money import BalanceType, Currency, Money
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
 from tradeup.execution.reservations import ReservationRegistry
 from tradeup.metadata.bymykel import load_pinned_snapshot
@@ -145,6 +152,15 @@ class BatchResult:
     #: (candidate_id, result) for every automated-execution attempt, including
     #: typed refusals — zero buys is a result and is reported as one.
     executions: tuple[tuple[str, ExecutionResult], ...] = ()
+    #: Every recorded standing buy order judged against this batch's board.
+    order_verdicts: tuple[OrderVerdict, ...] = ()
+    #: Written when any standing order needs operator attention.
+    order_alert_path: Path | None = None
+    #: Set when the standing-orders file exists but could not be parsed —
+    #: surfaced loudly because unreviewed orders are unpriced risk.
+    order_watch_error: str | None = None
+    #: Machine-readable order parameters written alongside an entry alert.
+    proposed_orders_path: Path | None = None
 
 
 def _fetch_catalog_quotes(settings: Settings, now: datetime) -> dict[str, SkinportItemQuote]:
@@ -401,6 +417,17 @@ def run_confirmation_batch(
         history = repository.all_rows()
     database.dispose()
 
+    standing_orders, order_watch_error = _load_standing_orders(settings)
+    order_verdicts = (
+        review_standing_orders(standing_orders, prospects, target_roi=settings.final_min_net_roi)
+        if standing_orders
+        else ()
+    )
+    attention = tuple(verdict for verdict in order_verdicts if verdict.needs_attention)
+    order_alert_path = (
+        _write_order_alert(attention, settings=settings, moment=recorded_at) if attention else None
+    )
+
     entry_hits = tuple(
         outcome
         for outcome in outcomes
@@ -421,9 +448,18 @@ def run_confirmation_batch(
             attempt = asyncio.run(buyer.execute_candidate(hit.candidate, moment=recorded_at))
             executions.extend((hit.candidate.candidate_id, result) for result in attempt)
 
+    proposed_orders_path = (
+        _write_proposed_orders(entry_hits, settings=settings, moment=recorded_at)
+        if entry_hits
+        else None
+    )
     alert_path = (
         _write_entry_alert(
-            entry_hits, executions=tuple(executions), settings=settings, moment=recorded_at
+            entry_hits,
+            executions=tuple(executions),
+            proposed_orders=proposed_orders_path,
+            settings=settings,
+            moment=recorded_at,
         )
         if entry_hits
         else None
@@ -440,7 +476,123 @@ def run_confirmation_batch(
         applied_ask_haircuts=policy.ask_haircut_by_quality,
         alert_path=alert_path,
         executions=tuple(executions),
+        order_verdicts=order_verdicts,
+        order_alert_path=order_alert_path,
+        order_watch_error=order_watch_error,
+        proposed_orders_path=proposed_orders_path,
     )
+
+
+def _load_standing_orders(
+    settings: Settings,
+) -> tuple[tuple[StandingOrder, ...], str | None]:
+    """Operator-recorded standing orders, or a loud error. Never a silent skip.
+
+    The file is operator-maintained state: the batch proposes parameters, the
+    operator places the orders at the venue by hand and copies the proposal to
+    ``artifacts/orders/standing-orders.json`` to enable revalidation. A file
+    that exists but cannot be parsed is reported as an error — an unreviewed
+    standing order is unpriced risk, not a detail to skip quietly.
+    """
+    path = settings.artifacts_dir / "orders" / "standing-orders.json"
+    if not path.exists():
+        return (), None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        orders = tuple(
+            StandingOrder(
+                collection_id=entry["collection_id"],
+                quality=QualityType(entry["quality"]),
+                input_wear=WearCondition(entry["input_wear"]),
+                market_hash_name=entry["market_hash_name"],
+                units=int(entry["units"]),
+                max_price=Money(
+                    int(entry["max_price_minor"]),
+                    Currency(entry["currency"]),
+                    BalanceType.CASH_WITHDRAWABLE,
+                ),
+                placed_at=datetime.fromisoformat(entry["placed_at"]),
+                source_candidate_id=entry.get("source_candidate_id"),
+            )
+            for entry in payload["orders"]
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return (), f"{path}: {exc!r} — standing orders were NOT reviewed this batch"
+    return orders, None
+
+
+def _write_proposed_orders(
+    hits: Sequence[ConfirmationOutcome],
+    *,
+    settings: Settings,
+    moment: datetime,
+) -> Path | None:
+    """Machine-readable buy-order parameters matching the alert card."""
+    entries: list[dict[str, object]] = []
+    for outcome in hits:
+        assessment = outcome.assessment
+        if assessment is None:
+            continue
+        for plan in outcome.prospect.inputs:
+            entries.append(
+                {
+                    "collection_id": outcome.prospect.collection_id,
+                    "quality": outcome.prospect.quality.value,
+                    "input_wear": outcome.prospect.input_wear.value,
+                    "market_hash_name": plan.market_hash_name,
+                    "units": plan.units,
+                    "max_price_minor": assessment.target_unit.minor_units,
+                    "currency": assessment.target_unit.currency.value,
+                    "placed_at": moment.isoformat(),
+                    "source_candidate_id": outcome.candidate_id,
+                }
+            )
+    if not entries:
+        return None
+    alert_dir = settings.artifacts_dir / "alerts"
+    alert_dir.mkdir(parents=True, exist_ok=True)
+    path = alert_dir / f"standing-orders-proposed-{moment.strftime('%Y%m%dT%H%M%SZ')}.json"
+    payload = {
+        "note": (
+            "PROPOSED buy-order parameters, not placed orders. Place them at the "
+            "venue by hand, adjust placed_at, and copy this file to "
+            "artifacts/orders/standing-orders.json so every batch revalidates "
+            "the standing prices against fresh exit evidence."
+        ),
+        "orders": entries,
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_order_alert(
+    verdicts: Sequence[OrderVerdict],
+    *,
+    settings: Settings,
+    moment: datetime,
+) -> Path:
+    """Operator notice: standing orders whose economics no longer hold."""
+    alert_dir = settings.artifacts_dir / "alerts"
+    alert_dir.mkdir(parents=True, exist_ok=True)
+    path = alert_dir / f"order-alert-{moment.strftime('%Y%m%dT%H%M%SZ')}.md"
+    lines = [
+        "# ORDER ALERT -- standing buy orders need attention",
+        "",
+        f"Generated {moment.isoformat()} from the current catalogue sweep.",
+        "Estimate-derived (the sweep's priors apply); re-confirm against exact",
+        "listings before acting. Nothing was bought or cancelled here -- order",
+        "changes are operator actions at the venue.",
+        "",
+    ]
+    for verdict in verdicts:
+        order = verdict.order
+        lines.append(
+            f"- `{order.market_hash_name}` x{order.units} (standing {order.max_price}): "
+            f"{verdict.status.value} -- {verdict.detail}"
+        )
+    lines.append("")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
 def _buy_order_lines(outcome: ConfirmationOutcome) -> list[str]:
@@ -498,6 +650,7 @@ def _write_entry_alert(
     hits: Sequence[ConfirmationOutcome],
     *,
     executions: tuple[tuple[str, ExecutionResult], ...] = (),
+    proposed_orders: Path | None = None,
     settings: Settings,
     moment: datetime,
 ) -> Path:
@@ -550,6 +703,13 @@ def _write_entry_alert(
                 f"- `{candidate_id}` intent `{execution.intent_id}`: "
                 f"{execution.status.value} -- {execution.detail}"
             )
+        lines.append("")
+    if proposed_orders is not None:
+        active = settings.artifacts_dir / "orders" / "standing-orders.json"
+        lines.append(f"Machine-readable order parameters: `{proposed_orders}`.")
+        lines.append(f"After placing the orders at the venue, copy that file to `{active}`")
+        lines.append("so every future batch revalidates your standing prices against")
+        lines.append("fresh exit evidence and alerts you on decay.")
         lines.append("")
     lines.append("Listings move. Re-confirm (`tradeup candidates confirm --rank 1`) before")
     lines.append("acting; this alert is a measurement, not an instruction to spend.")

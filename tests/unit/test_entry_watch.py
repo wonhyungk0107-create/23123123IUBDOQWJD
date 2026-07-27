@@ -8,6 +8,7 @@ observations.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from fractions import Fraction
@@ -20,6 +21,7 @@ from tradeup.discovery.calibration import (
     applied_haircuts,
     build_calibration_report,
 )
+from tradeup.discovery.order_watch import OrderWatchStatus
 from tradeup.discovery.prospects import InputPlan, Prospect, ProspectPolicy
 from tradeup.domain.items import QualityType, Rarity, WearCondition
 from tradeup.domain.money import BalanceType, Currency, Money
@@ -28,6 +30,7 @@ from tradeup.persistence.models import ProspectConfirmationRow
 from tradeup.persistence.repositories import ConfirmationRepository
 from tradeup.pipeline.confirm_batch import (
     ConfirmationOutcome,
+    _load_standing_orders,
     _write_entry_alert,
     run_confirmation_batch,
 )
@@ -160,8 +163,31 @@ def test_alert_card_states_the_boundaries(settings_obj: Settings) -> None:
 
 
 def test_batch_feeds_calibration_back_and_stays_offline(settings_obj: Settings) -> None:
-    """Ten recorded StatTrak pairs steer the next sweep's StatTrak haircut;
-    an empty catalogue produces no leads, no confirmations and no alert."""
+    """Ten recorded StatTrak pairs steer the next sweep's StatTrak haircut; an
+    empty catalogue produces no leads and no entry alert; a standing order the
+    empty board cannot price is flagged for attention, not reassured."""
+    orders_dir = settings_obj.artifacts_dir / "orders"
+    orders_dir.mkdir(parents=True, exist_ok=True)
+    (orders_dir / "standing-orders.json").write_text(
+        json.dumps(
+            {
+                "orders": [
+                    {
+                        "collection_id": "col-genesis",
+                        "quality": "STATTRAK",
+                        "input_wear": "WELL_WORN",
+                        "market_hash_name": "Synthetic Skin (Well-Worn)",
+                        "units": 10,
+                        "max_price_minor": 13,
+                        "currency": "USD",
+                        "placed_at": FROZEN_NOW.isoformat(),
+                        "source_candidate_id": "TU-abc123def456",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     database = create_database(settings_obj.database_url)
     database.create_all()
     with database.session() as session:
@@ -218,3 +244,20 @@ def test_batch_feeds_calibration_back_and_stays_offline(settings_obj: Settings) 
     assert result.alert_path is None
     assert result.history_rows == 10
     assert result.calibration.has_data
+    assert result.order_watch_error is None
+    assert len(result.order_verdicts) == 1
+    assert result.order_verdicts[0].status is OrderWatchStatus.LEAD_UNPRICEABLE
+    assert result.order_alert_path is not None
+    order_alert = result.order_alert_path.read_text(encoding="utf-8")
+    assert "ORDER ALERT" in order_alert
+    assert "Synthetic Skin (Well-Worn)" in order_alert
+
+
+def test_malformed_standing_orders_fail_loudly(settings_obj: Settings) -> None:
+    orders_dir = settings_obj.artifacts_dir / "orders"
+    orders_dir.mkdir(parents=True, exist_ok=True)
+    (orders_dir / "standing-orders.json").write_text("{not json", encoding="utf-8")
+    orders, error = _load_standing_orders(settings_obj)
+    assert orders == ()
+    assert error is not None
+    assert "NOT reviewed" in error

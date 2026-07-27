@@ -449,6 +449,22 @@ def candidates_confirm_batch(
                 f"(unit cap {assessment.target_unit.as_major()}) -> {state}"
             )
 
+    if result.order_watch_error:
+        typer.echo(f"\nWARNING standing-order file unreadable: {result.order_watch_error}")
+    if result.order_verdicts:
+        typer.echo("\nSTANDING ORDER WATCH")
+        for verdict in result.order_verdicts:
+            typer.echo(
+                f"  {verdict.order.market_hash_name} x{verdict.order.units}: "
+                f"{verdict.status.value}  {verdict.detail}"
+            )
+    if result.order_alert_path is not None:
+        typer.echo("\n" + "!" * 62)
+        typer.echo("ORDER ALERT: standing buy orders need repricing or cancellation.")
+        typer.echo(f"Details: {result.order_alert_path}")
+        typer.echo("Nothing was bought or cancelled; act at the venue.")
+        typer.echo("!" * 62)
+
     if result.executions:
         typer.echo("\nAUTOMATED EXECUTION")
         for candidate_id, execution in result.executions:
