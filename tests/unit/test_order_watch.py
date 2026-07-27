@@ -86,6 +86,25 @@ def test_standing_price_within_ceiling_is_valid() -> None:
     assert not verdicts[0].needs_attention
 
 
+def test_exact_confirmation_beats_the_sweep_estimate() -> None:
+    # The first live pilot's shape: the sweep estimate prices the lead
+    # optimistically (ceiling far above the standing order), but this batch's
+    # exact confirmation put the true unit ceiling at 13 — below the standing
+    # 21. The exact figure must win and flag decay.
+    generous_estimate = _prospect(output_value_minor=14_000)
+    verdicts = review_standing_orders(
+        [_order(21)],
+        [generous_estimate],
+        target_roi=FLOOR,
+        confirmed_unit_ceilings={
+            ("col-genesis", "STATTRAK", "WELL_WORN"): _usd(13),
+        },
+    )
+    assert verdicts[0].status is OrderWatchStatus.CEILING_DECAYED
+    assert verdicts[0].current_unit_ceiling == _usd(13)
+    assert "exact confirmation this batch" in verdicts[0].detail
+
+
 def test_decayed_exits_flag_the_order() -> None:
     # Exits fell to V = 100 -> cap 95, per-unit 9. The standing 13 overpays.
     verdicts = review_standing_orders(
