@@ -27,6 +27,7 @@ CRITICAL_MODULES = (
     "src/tradeup/domain/items.py",
     "src/tradeup/domain/rules.py",
     "src/tradeup/domain/fees.py",
+    "src/tradeup/discovery/depth.py",
     "src/tradeup/optimizer/bundle.py",
     "src/tradeup/optimizer/pareto.py",
     "src/tradeup/valuation/capital.py",
