@@ -40,6 +40,7 @@ from tradeup.discovery.prospects import Prospect, ProspectPolicy, SweepStatistic
 from tradeup.domain.contracts import TradeupCandidate
 from tradeup.domain.execution import ExecutionResult
 from tradeup.domain.items import QualityType, Rarity
+from tradeup.domain.listings import MarketplaceListing
 from tradeup.domain.rules import DEFAULT_RULE_REGISTRY
 from tradeup.execution.reservations import ReservationRegistry
 from tradeup.metadata.bymykel import load_pinned_snapshot
@@ -48,6 +49,7 @@ from tradeup.persistence.models import ProspectConfirmationRow
 from tradeup.persistence.repositories import ConfirmationRepository
 from tradeup.pipeline.live_scan import LiveScanError, LiveScanResult, run_live_scan
 from tradeup.purchasing import AutoBuyer
+from tradeup.reporting.operator_card import venue_listing_url
 from tradeup.valuation.entry_targets import EntryAssessment, assess_entry
 from tradeup.valuation.venue_fees import build_live_fee_schedule
 
@@ -323,7 +325,9 @@ def run_confirmation_batch(
                 exact_ev = evaluation.ev_net.minor_units
                 exact_roi = evaluation.roi_net
                 approved = best.approved
-                input_listings = tuple(str(item.listing) for item in best.candidate.inputs)
+                input_listings = tuple(
+                    _listing_line(item.listing) for item in best.candidate.inputs
+                )
                 if best.rejection is not None:
                     reasons = ",".join(r.value for r in best.rejection.reasons)
                 if evaluation.acquisition_cost.minor_units >= 1:
@@ -437,6 +441,16 @@ def run_confirmation_batch(
         alert_path=alert_path,
         executions=tuple(executions),
     )
+
+
+def _listing_line(listing: MarketplaceListing) -> str:
+    """Listing summary plus a direct venue link where one is documented.
+
+    The link turns the operator flow into notification -> click -> buy; the
+    purchase click and the Steam trade-offer acceptance stay human.
+    """
+    url = venue_listing_url(listing.identity.venue, listing.identity.listing_id)
+    return f"{listing} -> {url}" if url else str(listing)
 
 
 def _write_entry_alert(
