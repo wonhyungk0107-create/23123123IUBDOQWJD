@@ -418,8 +418,28 @@ def run_confirmation_batch(
     database.dispose()
 
     standing_orders, order_watch_error = _load_standing_orders(settings)
+    # Ceilings measured from exact listings this batch beat sweep estimates.
+    # Two confirmations of one lead keep the lower ceiling — the pessimistic one.
+    confirmed_unit_ceilings: dict[tuple[str, str, str], Money] = {}
+    for outcome in outcomes:
+        if outcome.assessment is None:
+            continue
+        lead_key = (
+            outcome.prospect.collection_id,
+            outcome.prospect.quality.value,
+            outcome.prospect.input_wear.value,
+        )
+        unit_ceiling = outcome.assessment.target_unit
+        existing = confirmed_unit_ceilings.get(lead_key)
+        if existing is None or unit_ceiling < existing:
+            confirmed_unit_ceilings[lead_key] = unit_ceiling
     order_verdicts = (
-        review_standing_orders(standing_orders, prospects, target_roi=settings.final_min_net_roi)
+        review_standing_orders(
+            standing_orders,
+            prospects,
+            target_roi=settings.final_min_net_roi,
+            confirmed_unit_ceilings=confirmed_unit_ceilings,
+        )
         if standing_orders
         else ()
     )

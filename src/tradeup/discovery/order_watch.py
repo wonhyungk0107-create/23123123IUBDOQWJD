@@ -24,7 +24,7 @@ exact listings, not a measurement of loss.
 from __future__ import annotations
 
 import enum
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -104,10 +104,23 @@ def review_standing_orders(
     prospects: Sequence[Prospect],
     *,
     target_roi: Ratio,
+    confirmed_unit_ceilings: Mapping[tuple[str, str, str], Money] | None = None,
 ) -> tuple[OrderVerdict, ...]:
-    """Judge every standing order against the current board. Order-preserving."""
+    """Judge every standing order against the current board. Order-preserving.
+
+    ``confirmed_unit_ceilings`` carries per-lead ceilings measured from exact
+    listings this batch. Exact evidence always beats the sweep estimate: the
+    first live pilot showed an estimate-derived ceiling of $1.26/unit for a
+    lead whose exact confirmation, in the same batch, put the ceiling at
+    $0.13/unit — an optimistic verdict from priors when the truth was on hand.
+    """
+    confirmed = dict(confirmed_unit_ceilings or {})
     verdicts: list[OrderVerdict] = []
     for order in orders:
+        exact_ceiling = confirmed.get(order.lead_key)
+        if exact_ceiling is not None:
+            verdicts.append(_judge(order, exact_ceiling, evidence="exact confirmation this batch"))
+            continue
         prospect = _best_variant(prospects, order.lead_key)
         if prospect is None:
             verdicts.append(
@@ -137,28 +150,29 @@ def review_standing_orders(
                 )
             )
             continue
-        if order.max_price <= ceiling:
-            headroom = ceiling - order.max_price
-            verdicts.append(
-                OrderVerdict(
-                    order=order,
-                    status=OrderWatchStatus.STILL_VALID,
-                    current_unit_ceiling=ceiling,
-                    detail=f"standing {order.max_price} within today's ceiling "
-                    f"{ceiling} (headroom {headroom})",
-                )
-            )
-        else:
-            verdicts.append(
-                OrderVerdict(
-                    order=order,
-                    status=OrderWatchStatus.CEILING_DECAYED,
-                    current_unit_ceiling=ceiling,
-                    detail=(
-                        f"today's entry ceiling is {ceiling}, below the standing "
-                        f"{order.max_price}; fills at the standing price would no "
-                        "longer clear the floor — reprice or cancel"
-                    ),
-                )
-            )
+        verdicts.append(_judge(order, ceiling, evidence="sweep estimate under its priors"))
     return tuple(verdicts)
+
+
+def _judge(order: StandingOrder, ceiling: Money, *, evidence: str) -> OrderVerdict:
+    if order.max_price <= ceiling:
+        headroom = ceiling - order.max_price
+        return OrderVerdict(
+            order=order,
+            status=OrderWatchStatus.STILL_VALID,
+            current_unit_ceiling=ceiling,
+            detail=(
+                f"standing {order.max_price} within today's ceiling {ceiling} "
+                f"(headroom {headroom}; ceiling from {evidence})"
+            ),
+        )
+    return OrderVerdict(
+        order=order,
+        status=OrderWatchStatus.CEILING_DECAYED,
+        current_unit_ceiling=ceiling,
+        detail=(
+            f"today's entry ceiling is {ceiling} (from {evidence}), below the "
+            f"standing {order.max_price}; fills at the standing price would no "
+            "longer clear the floor — reprice or cancel"
+        ),
+    )
