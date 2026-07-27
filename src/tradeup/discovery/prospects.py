@@ -58,6 +58,10 @@ class ProspectPolicy:
     #: Discount on output asks: nobody has paid an ask. Matches the exit policy's
     #: DEPTH_ADJUSTED_ASK haircut so sweep and scanner speak the same dialect.
     ask_haircut: Decimal = Decimal("0.12")
+    #: Calibrated per-quality overrides, e.g. from ``applied_haircuts``. A quality
+    #: not listed falls back to ``ask_haircut``. Tuple-of-pairs keeps the policy
+    #: hashable and frozen.
+    ask_haircut_by_quality: tuple[tuple[QualityType, Decimal], ...] = ()
     #: Where in the (wear band ∩ float range) interval inputs are assumed to sit.
     #: 1/2 is the midpoint; sourcing low-float inputs cheaply is not assumed.
     wear_point: Fraction = Fraction(1, 2)
@@ -71,12 +75,26 @@ class ProspectPolicy:
     def __post_init__(self) -> None:
         if not (Decimal(0) <= self.ask_haircut < Decimal(1)):
             raise ValueError("ask_haircut must be within [0, 1)")
+        qualities_seen: set[QualityType] = set()
+        for quality, haircut in self.ask_haircut_by_quality:
+            if quality in qualities_seen:
+                raise ValueError(f"duplicate per-quality haircut for {quality.value}")
+            qualities_seen.add(quality)
+            if not (Decimal(0) <= haircut < Decimal(1)):
+                raise ValueError(f"per-quality haircut for {quality.value} must be within [0, 1)")
         if not (0 <= self.wear_point <= 1):
             raise ValueError("wear_point must be within [0, 1]")
         if not (0 <= self.max_unpriced_probability <= 1):
             raise ValueError("max_unpriced_probability must be within [0, 1]")
         if self.mixed_filler_pool < 1:
             raise ValueError("mixed_filler_pool must be at least 1")
+
+    def haircut_for(self, quality: QualityType) -> Decimal:
+        """The ask haircut this quality's estimates run under."""
+        for candidate_quality, haircut in self.ask_haircut_by_quality:
+            if candidate_quality is quality:
+                return haircut
+        return self.ask_haircut
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +130,9 @@ class Prospect:
     outcome_count: int
     unpriced_probability: Fraction
     observed_at: datetime
+    #: The haircut this estimate was computed under. Provenance for calibration:
+    #: once haircuts diverge by quality, "the policy's haircut" is ambiguous.
+    ask_haircut: Decimal
     #: Exact composition, e.g. ``(("col-a", 7), ("col-b", 3))``. The primary
     #: collection fields above name the side contributing the most inputs.
     counts_by_collection: tuple[tuple[str, int], ...] = ()
@@ -180,6 +201,7 @@ class Prospect:
             "estimated_output_value_minor": self.estimated_output_value.minor_units,
             "estimated_ev_minor": self.estimated_ev.minor_units,
             "estimated_roi": str(self.estimated_roi),
+            "ask_haircut": str(self.ask_haircut),
             "average_normalized": str(self.average_normalized),
             "outcome_count": self.outcome_count,
             "unpriced_probability": str(self.unpriced_probability),
@@ -544,6 +566,7 @@ def _evaluate(
     outputs_by_id = {
         skin.skin_id: skin for component, _count in parts for skin in component.outputs
     }
+    applied_haircut = policy.haircut_for(quality)
     terms: list[tuple[Fraction, Money]] = []
     unpriced = Fraction(0)
     for entry in probabilities:
@@ -567,7 +590,7 @@ def _evaluate(
             sale_fee = fee_schedule.quote(_REFERENCE_VENUE, FeeOperation.SALE, gross, moment).fee
         except UnknownFeeError:
             return "rules"
-        haircut = gross.scaled_up(policy.ask_haircut)
+        haircut = gross.scaled_up(applied_haircut)
         net = gross - sale_fee - haircut
         if net.is_negative:
             net = zero
@@ -598,6 +621,7 @@ def _evaluate(
         outcome_count=len(probabilities),
         unpriced_probability=unpriced,
         observed_at=moment,
+        ask_haircut=applied_haircut,
         counts_by_collection=tuple(
             sorted((component.collection_id, count) for component, count in parts)
         ),
