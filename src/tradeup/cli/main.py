@@ -421,6 +421,65 @@ def candidates_confirm_batch(
             f"{row['est_roi']:>10}{row['exact_roi']:>11}  {row['status']:<12}{row['reasons']}"
         )
 
+    if result.applied_ask_haircuts:
+        applied = ", ".join(
+            f"{quality.value}={haircut}" for quality, haircut in result.applied_ask_haircuts
+        )
+        typer.echo(f"\nSweep ask haircuts applied (calibrated where reliable): {applied}")
+
+    entry_rows = [outcome for outcome in result.outcomes if outcome.assessment is not None]
+    if entry_rows:
+        typer.echo(f"\nENTRY TARGETS (final ROI floor {settings.final_min_net_roi})")
+        for outcome in entry_rows:
+            assessment = outcome.assessment
+            if assessment is None:
+                continue
+            label = (
+                f"{outcome.prospect.collection_name} {outcome.prospect.quality.value} "
+                f"{outcome.prospect.input_wear.value}"
+            )
+            state = (
+                "ENTRY MET"
+                if assessment.entry_met
+                else f"short by {assessment.shortfall.as_major()}"
+            )
+            typer.echo(
+                f"  {label}: bundle {assessment.observed_total.as_major()} vs cap "
+                f"{assessment.target_total.as_major()} "
+                f"(unit cap {assessment.target_unit.as_major()}) -> {state}"
+            )
+
+    if result.order_watch_error:
+        typer.echo(f"\nWARNING standing-order file unreadable: {result.order_watch_error}")
+    if result.order_verdicts:
+        typer.echo("\nSTANDING ORDER WATCH")
+        for verdict in result.order_verdicts:
+            typer.echo(
+                f"  {verdict.order.market_hash_name} x{verdict.order.units}: "
+                f"{verdict.status.value}  {verdict.detail}"
+            )
+    if result.order_alert_path is not None:
+        typer.echo("\n" + "!" * 62)
+        typer.echo("ORDER ALERT: standing buy orders need repricing or cancellation.")
+        typer.echo(f"Details: {result.order_alert_path}")
+        typer.echo("Nothing was bought or cancelled; act at the venue.")
+        typer.echo("!" * 62)
+
+    if result.executions:
+        typer.echo("\nAUTOMATED EXECUTION")
+        for candidate_id, execution in result.executions:
+            typer.echo(
+                f"  {candidate_id} {execution.intent_id}: {execution.status.value}"
+                f"  {execution.detail}"
+            )
+
+    if result.alert_path is not None:
+        typer.echo("\n" + "!" * 62)
+        typer.echo("ENTRY ALERT: approved candidate(s) at or below the entry target.")
+        typer.echo(f"Operator card: {result.alert_path}")
+        typer.echo("Acquisition remains gated; see the execution lines above.")
+        typer.echo("!" * 62)
+
     _echo_calibration(result.calibration, result.history_rows)
     typer.echo("\nNothing was bought; every confirmation is a read-only measurement.")
 

@@ -20,6 +20,7 @@ from hypothesis import strategies as st
 from tradeup.domain.fees import FeeOperation, FeeRule, FeeSchedule, UnknownFeeError
 from tradeup.domain.money import BalanceType, Currency, Money
 from tradeup.valuation.entry_targets import (
+    assess_entry,
     max_acquisition_cost,
     max_sticker_price,
     per_unit_entry_target,
@@ -266,6 +267,47 @@ def test_sticker_inversion_matches_brute_force(schedule: FeeSchedule, cap: int) 
         moment=MOMENT,
     )
     assert result.minor_units == expected
+
+
+@given(
+    value=values,
+    fixed=fixed_overheads,
+    target=targets,
+    observed=st.integers(min_value=1, max_value=10**9),
+    count=st.integers(1, 10),
+)
+def test_entry_assessment_agrees_with_forward_model(
+    value: int, fixed: int, target: Fraction, observed: int, count: int
+) -> None:
+    """entry_met must equal the independent forward check at the observed
+    spend, and shortfall must be zero exactly when entry is met."""
+    assessment = assess_entry(
+        expected_net_output_value=_usd(value),
+        observed_acquisition_cost=_usd(observed),
+        input_count=count,
+        target_roi=target,
+        fixed_overhead=_usd(fixed),
+    )
+    assert assessment.entry_met == _forward_clears(
+        observed, value_minor=value, fixed_minor=fixed, target=target, overhead=Fraction(0)
+    )
+    assert assessment.entry_met == assessment.shortfall.is_zero
+    assert not assessment.shortfall.is_negative
+    assert (
+        assessment.observed_total.minor_units - assessment.shortfall.minor_units
+        <= assessment.target_total.minor_units
+    )
+    assert assessment.target_unit == per_unit_entry_target(assessment.target_total, count)
+
+
+def test_entry_assessment_rejects_non_positive_observed_cost() -> None:
+    with pytest.raises(ValueError):
+        assess_entry(
+            expected_net_output_value=_usd(1000),
+            observed_acquisition_cost=_usd(0),
+            input_count=10,
+            target_roi=Fraction(1, 20),
+        )
 
 
 def test_overlapping_tiers_are_rejected() -> None:
